@@ -1,0 +1,157 @@
+:root {
+  --bg: #0e0d1d;
+  --tile: #15151f;
+  --tile-2: #1b1b28;
+  --line: rgba(255,255,255,0.08);
+  --lime: #d8ef3d;
+  --lime-dark: #202a00;
+  --cyan: #45e0e0;
+  --text: #f4f5f9;
+  --text-dim: #9b9db4;
+  --purple: #8b2fd6;
+  --magenta: #e8347c;
+  --gold-1: #efe1b0;
+  --gold-2: #d9bd7f;
+  --gold-text: #46390f;
+  --dark-card-1: #2b2b3d;
+  --dark-card-2: #17171f;
+  --blue: #2e6fe0;
+  --red: #e0374a;
+  --font-display: "Barlow Condensed";
+  --font-body: "Archivo";
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font-body), system-ui, sans-serif;
+  min-height: 100vh;
+  overflow-x: hidden;
+}
+
+/* stadium backdrop: purple/blue glow + light beams + diagonal floor */
+.stage {
+  position: fixed;
+  inset: 0;
+  z-index: -1;
+  background:
+    radial-gradient(1000px 620px at 78% -6%, rgba(139,47,214,0.45), transparent 60%),
+    radial-gradient(820px 520px at 8% 4%, rgba(46,79,226,0.35), transparent 62%),
+    radial-gradient(900px 700px at 50% 118%, rgba(139,47,214,0.28), transparent 60%),
+    linear-gradient(178deg, #16142e 0%, #0e0d1d 46%, #0b0a16 100%);
+}
+.beam {
+  position: absolute;
+  top: -12%;
+  width: 130px;
+  height: 75%;
+  background: linear-gradient(to bottom, rgba(216,180,255,0.32), rgba(216,180,255,0));
+  filter: blur(26px);
+  transform-origin: top center;
+}
+.stage .floor {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 26%;
+  background:
+    repeating-linear-gradient(115deg, rgba(122,80,255,0.12) 0 46px, rgba(122,80,255,0) 46px 92px),
+    repeating-linear-gradient(65deg, rgba(70,120,255,0.10) 0 60px, rgba(70,120,255,0) 60px 120px),
+    linear-gradient(to top, rgba(70,50,160,0.35), transparent);
+  mask-image: linear-gradient(to top, black 55%, transparent);
+}
+
+.display {
+  font-family: var(--font-display), sans-serif;
+  text-transform: uppercase;
+  letter-spacing: 0.02em;
+}
+.ital { font-style: italic; }
+
+/* FIFA bottom-nav skewed tile */
+.tile {
+  position: relative;
+  background: rgba(21,21,31,0.92);
+  border: 1px solid var(--line);
+  transform: skewX(-14deg);
+  cursor: pointer;
+  overflow: hidden;
+  transition: background 0.18s, border-color 0.18s;
+}
+.tile > .tile-in { transform: skewX(14deg); }
+.tile:hover { border-color: rgba(255,255,255,0.28); }
+.tile.active { background: var(--lime); border-color: var(--lime); }
+.tile.active .tile-label { color: var(--lime-dark); }
+.tile-label {
+  font-family: var(--font-display), sans-serif;
+  font-style: italic;
+  text-transform: uppercase;
+  font-weight: 700;
+  color: var(--cyan);
+  letter-spacing: 0.04em;
+}
+.tile-ghost {
+  position: absolute;
+  right: -6px;
+  bottom: -14px;
+  font-family: var(--font-display), sans-serif;
+  font-style: italic;
+  font-weight: 800;
+  font-size: 54px;
+  color: rgba(255,255,255,0.05);
+  pointer-events: none;
+  transform: skewX(14deg);
+}
+
+/* chevron step strip (YOUR SQUAD progress bar style) */
+.chev {
+  clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 0 100%, 14px 50%);
+  background: rgba(21,21,31,0.92);
+  border: 1px solid var(--line);
+  padding: 7px 26px 7px 30px;
+}
+.chev.first { clip-path: polygon(0 0, calc(100% - 14px) 0, 100% 50%, calc(100% - 14px) 100%, 0 100%); padding-left: 20px; }
+.chev.hot { background: var(--lime); color: var(--lime-dark); }
+.chev.hot .display { color: var(--lime-dark); }
+
+/* controller-hint glyph */
+.hint-key {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 17px; height: 17px;
+  border-radius: 50%;
+  border: 1.5px solid var(--text-dim);
+  font-size: 10px;
+  color: var(--text-dim);
+  margin-right: 6px;
+}
+
+@keyframes riseIn { from { opacity: 0; transform: translateY(14px);} to { opacity:1; transform: translateY(0);} }
+@keyframes slideRight { from { opacity: 0; transform: translateX(-16px);} to { opacity:1; transform: translateX(0);} }
+@keyframes limeRing {
+  0% { box-shadow: 0 0 0 0 rgba(216,239,61,0.65); }
+  70% { box-shadow: 0 0 0 12px rgba(216,239,61,0); }
+  100% { box-shadow: 0 0 0 0 rgba(216,239,61,0); }
+}
+@keyframes dangerRing {
+  0% { box-shadow: 0 0 0 0 rgba(232,52,124,0.6); }
+  70% { box-shadow: 0 0 0 12px rgba(232,52,124,0); }
+  100% { box-shadow: 0 0 0 0 rgba(232,52,124,0); }
+}
+@keyframes breathe { 0%,100% { transform: translateY(0);} 50% { transform: translateY(-3px);} }
+@keyframes headShake { 0%,100%{transform:rotate(0)} 20%{transform:rotate(-7deg)} 40%{transform:rotate(6deg)} 60%{transform:rotate(-4deg)} 80%{transform:rotate(3deg)} }
+@keyframes armWave { 0%,100%{transform:rotate(0)} 50%{transform:rotate(-38deg)} }
+@keyframes jump { 0%,100%{transform:translateY(0)} 30%{transform:translateY(-12px)} 55%{transform:translateY(0)} 75%{transform:translateY(-5px)} }
+@keyframes sweatDrop { 0%{opacity:0; transform:translateY(-2px)} 30%{opacity:1} 100%{opacity:0; transform:translateY(10px)} }
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
+}

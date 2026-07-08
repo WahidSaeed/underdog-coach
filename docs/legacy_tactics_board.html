@@ -1,0 +1,634 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Underdog Coach</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Barlow+Condensed:wght@500;600;700&family=Inter:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --bg:#0B0E14;
+    --panel:#131826;
+    --panel-2:#1B2233;
+    --panel-3:#232B40;
+    --border:#2A3247;
+    --text:#F5F7FA;
+    --text-dim:#8E96AA;
+    --pitch:#0F3D24;
+    --pitch-line:#154a2c;
+    --chalk:#EAF3EC;
+    --blue:#2E6FE0;
+    --blue-dim:#1B3E82;
+    --red:#D6373F;
+    --red-dim:#7E1F26;
+    --gold:#F2B134;
+    --green:#3EBD6E;
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    background:var(--bg);
+    color:var(--text);
+    font-family:'Inter', sans-serif;
+    padding:20px;
+  }
+  .app{ max-width:1180px; margin:0 auto; }
+  header{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:22px;
+    padding:14px 20px;
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:10px;
+    margin-bottom:16px;
+  }
+  .team-tag{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    font-family:'Barlow Condensed', sans-serif;
+    font-weight:700;
+    font-size:22px;
+    letter-spacing:0.5px;
+  }
+  .dot{ width:12px; height:12px; border-radius:50%; }
+  .vs{
+    font-family:'Barlow Condensed', sans-serif;
+    color:var(--text-dim);
+    font-size:16px;
+  }
+  .scenario-bar{
+    text-align:center;
+    font-size:13px;
+    color:var(--text-dim);
+    margin-bottom:18px;
+  }
+  .scenario-bar b{ color:var(--gold); font-weight:500; }
+  .layout{
+    display:grid;
+    grid-template-columns:1fr 340px;
+    gap:18px;
+    align-items:start;
+  }
+  .pitch-shell{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:14px;
+  }
+  #pitch{
+    position:relative;
+    width:100%;
+    aspect-ratio:15/10;
+    background:
+      repeating-linear-gradient(
+        to bottom,
+        var(--pitch) 0px, var(--pitch) 11.11%,
+        var(--pitch-line) 11.11%, var(--pitch-line) 22.22%
+      );
+    border:2px solid var(--chalk);
+    border-radius:4px;
+    overflow:hidden;
+  }
+  .line{ position:absolute; background:var(--chalk); opacity:0.85; }
+  .halfway{ left:0; right:0; top:50%; height:2px; transform:translateY(-50%); }
+  .box{ position:absolute; border:2px solid var(--chalk); opacity:0.85; }
+  .circle{
+    position:absolute; left:50%; top:50%;
+    width:15%; aspect-ratio:1;
+    border:2px solid var(--chalk);
+    border-radius:50%;
+    opacity:0.85;
+    transform:translate(-50%,-50%);
+  }
+  .spot{
+    position:absolute; width:5px; height:5px; border-radius:50%;
+    background:var(--chalk); transform:translate(-50%,-50%); opacity:0.85;
+  }
+  .pawn{
+    position:absolute;
+    width:32px; height:32px;
+    transform:translate(-50%,-50%);
+    border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:13px; font-weight:500;
+    color:#fff;
+    border:2px solid rgba(255,255,255,0.35);
+    cursor:grab;
+    touch-action:none;
+    user-select:none;
+    box-shadow:0 2px 6px rgba(0,0,0,0.45);
+  }
+  .pawn.blue{ background:var(--blue); }
+  .pawn.red{ background:var(--red); }
+  .pawn.gk{ background:var(--gold); color:#1a1400; border-color:rgba(0,0,0,0.25); }
+  .pawn:active{ cursor:grabbing; }
+  .pawn.selected{ outline:2px solid var(--gold); outline-offset:2px; }
+
+  .side{
+    display:flex; flex-direction:column; gap:14px;
+  }
+  .card{
+    background:var(--panel);
+    border:1px solid var(--border);
+    border-radius:12px;
+    padding:14px 16px;
+  }
+  .card h3{
+    font-family:'Barlow Condensed', sans-serif;
+    font-size:15px; font-weight:600;
+    letter-spacing:0.5px;
+    text-transform:uppercase;
+    color:var(--text-dim);
+    margin:0 0 10px;
+  }
+  .pill-row{ display:flex; flex-wrap:wrap; gap:7px; }
+  .pill-btn{
+    font-family:'Inter', sans-serif;
+    font-size:13px; font-weight:500;
+    background:var(--panel-2);
+    color:var(--text);
+    border:1px solid var(--border);
+    border-radius:20px;
+    padding:6px 13px;
+    cursor:pointer;
+  }
+  .pill-btn:hover{ border-color:var(--blue); }
+  .pill-btn.active{ background:var(--blue-dim); border-color:var(--blue); color:#fff; }
+
+  .btn-primary{
+    width:100%;
+    font-family:'Inter', sans-serif;
+    font-weight:600;
+    font-size:14px;
+    background:var(--gold);
+    color:#1a1400;
+    border:none;
+    border-radius:8px;
+    padding:11px;
+    cursor:pointer;
+    margin-bottom:8px;
+  }
+  .btn-primary:hover{ filter:brightness(1.08); }
+  .btn-ghost{
+    width:100%;
+    font-family:'Inter', sans-serif;
+    font-size:13px;
+    background:transparent;
+    color:var(--text-dim);
+    border:1px solid var(--border);
+    border-radius:8px;
+    padding:9px;
+    cursor:pointer;
+  }
+  .btn-ghost:hover{ color:var(--text); border-color:var(--text-dim); }
+
+  .coach-feed{
+    display:flex; flex-direction:column; gap:10px;
+    max-height:260px;
+    overflow-y:auto;
+    padding-right:2px;
+  }
+  .msg{
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    border-radius:10px;
+    padding:10px 12px;
+    font-size:13.5px;
+    line-height:1.5;
+  }
+  .msg .who{
+    display:block;
+    font-family:'Barlow Condensed', sans-serif;
+    font-size:12px;
+    font-weight:600;
+    color:var(--gold);
+    letter-spacing:0.4px;
+    margin-bottom:3px;
+  }
+  .msg b{ color:var(--text); font-weight:600; }
+
+  .legend{
+    display:flex; gap:16px; font-size:12px; color:var(--text-dim);
+    margin-top:12px;
+  }
+  .legend span{ display:flex; align-items:center; gap:6px; }
+  .sw{ width:10px; height:10px; border-radius:50%; display:inline-block; }
+
+  .overlay{
+    position:fixed; inset:0;
+    background:rgba(0,0,0,0.55);
+    display:none;
+    align-items:center; justify-content:center;
+    z-index:50;
+  }
+  .overlay.open{ display:flex; }
+  .player-card{
+    width:340px;
+    background:var(--panel-2);
+    border:1px solid var(--border);
+    border-radius:14px;
+    padding:20px;
+  }
+  .pc-top{
+    display:flex; align-items:center; gap:12px; margin-bottom:6px;
+  }
+  .pc-num{
+    width:40px; height:40px; border-radius:50%;
+    display:flex; align-items:center; justify-content:center;
+    font-family:'IBM Plex Mono', monospace;
+    font-size:15px; color:#fff;
+  }
+  .pc-name{
+    font-family:'Barlow Condensed', sans-serif;
+    font-size:22px; font-weight:700;
+  }
+  .pc-pos{ font-size:12px; color:var(--text-dim); }
+  .pc-close{
+    margin-left:auto;
+    background:none; border:none; color:var(--text-dim);
+    font-size:18px; cursor:pointer;
+  }
+  .radar-wrap{ display:flex; justify-content:center; margin:14px 0; }
+  .tag-section h4{
+    font-size:11px; text-transform:uppercase; letter-spacing:0.5px;
+    color:var(--text-dim); margin:12px 0 6px;
+  }
+  .tag{
+    display:inline-block;
+    font-size:12px;
+    padding:4px 10px;
+    border-radius:6px;
+    margin:0 6px 6px 0;
+    cursor:default;
+  }
+  .tag.str{ background:rgba(62,189,110,0.15); color:var(--green); border:1px solid rgba(62,189,110,0.35); }
+  .tag.weak{ background:rgba(214,55,63,0.15); color:#f18c92; border:1px solid rgba(214,55,63,0.35); }
+
+  .note{ font-size:12px; color:var(--text-dim); margin-top:14px; line-height:1.5; }
+</style>
+</head>
+<body>
+
+<div class="app">
+  <header>
+    <div class="team-tag"><span class="dot" style="background:var(--blue);"></span>MERIDIAN FC</div>
+    <div class="vs">VS</div>
+    <div class="team-tag"><span class="dot" style="background:var(--red);"></span>SOLVANE UNITED</div>
+  </header>
+  <div class="scenario-bar" id="scenarioBar">Set your shape, then ask the coach to see how <b>Solvane United</b> will try to break you down.</div>
+
+  <div class="layout">
+    <div class="pitch-shell">
+      <div id="pitch">
+        <div class="circle"></div>
+        <div class="spot" style="left:50%; top:50%;"></div>
+        <div class="line halfway"></div>
+        <div class="box" style="left:50%; top:0; width:40%; height:15%; transform:translateX(-50%); border-top:none;"></div>
+        <div class="box" style="left:50%; top:0; width:18%; height:6%; transform:translateX(-50%); border-top:none;"></div>
+        <div class="box" style="left:50%; bottom:0; width:40%; height:15%; transform:translateX(-50%); border-bottom:none;"></div>
+        <div class="box" style="left:50%; bottom:0; width:18%; height:6%; transform:translateX(-50%); border-bottom:none;"></div>
+      </div>
+    </div>
+
+    <div class="side">
+      <div class="card">
+        <h3>Formation</h3>
+        <div class="pill-row" id="formationRow">
+          <button class="pill-btn active" data-f="442">4-4-2</button>
+          <button class="pill-btn" data-f="433">4-3-3</button>
+          <button class="pill-btn" data-f="352">3-5-2</button>
+          <button class="pill-btn" data-f="532">5-3-2</button>
+        </div>
+      </div>
+
+      <div class="card">
+        <button class="btn-primary" id="askCoach">Ask the coach</button>
+        <button class="btn-ghost" id="resetBtn">Reset board</button>
+      </div>
+
+      <div class="card">
+        <h3>Coach feed</h3>
+        <div class="coach-feed" id="coachFeed">
+          <div class="msg"><span class="who">COACH</span>Tap any player to see their stat profile. Drag pawns to set your shape, then ask for feedback.</div>
+        </div>
+      </div>
+
+      <div class="legend">
+        <span><span class="sw" style="background:var(--blue);"></span>your team</span>
+        <span><span class="sw" style="background:var(--red);"></span>opponent</span>
+        <span><span class="sw" style="background:var(--gold);"></span>keeper</span>
+      </div>
+      <div class="note">Demo runs the matchup logic client-side. In production this panel calls the Coach and Opponent Manager agents (Strands + Bedrock AgentCore) over the same player data shown here.</div>
+    </div>
+  </div>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="player-card" id="playerCard"></div>
+</div>
+
+<script>
+const PLAYER_DATA = {
+  "blue": { "name": "Meridian FC", "color": "#2E6FE0", "players": [
+    { "id":"b1","num":1,"name":"J. Alvarez","position":"GK","stats":{"pace":45,"shooting":20,"passing":68,"defending":74,"physicality":70,"composure":66},"strengths":["quick_release_gk"],"weaknesses":["poor_distribution"] },
+    { "id":"b2","num":2,"name":"R. Kade","position":"RB","stats":{"pace":80,"shooting":40,"passing":71,"defending":73,"physicality":68,"composure":64},"strengths":["overlap_specialist"],"weaknesses":["poor_tracking_back"] },
+    { "id":"b3","num":3,"name":"D. Okafor","position":"CB","stats":{"pace":66,"shooting":25,"passing":62,"defending":84,"physicality":82,"composure":79},"strengths":["aerial_threat","leader"],"weaknesses":["slow_turning"] },
+    { "id":"b4","num":4,"name":"T. Marsh","position":"CB","stats":{"pace":60,"shooting":22,"passing":65,"defending":80,"physicality":77,"composure":70},"strengths":["tackling_specialist"],"weaknesses":["rash_tackler"] },
+    { "id":"b5","num":5,"name":"L. Fenwick","position":"LB","stats":{"pace":76,"shooting":35,"passing":69,"defending":71,"physicality":65,"composure":62},"strengths":["overlap_specialist"],"weaknesses":["weak_in_the_air"] },
+    { "id":"b6","num":6,"name":"S. Bianchi","position":"CM","stats":{"pace":63,"shooting":55,"passing":82,"defending":68,"physicality":66,"composure":75},"strengths":["vision_playmaker","press_resistant"],"weaknesses":["poor_positioning"] },
+    { "id":"b7","num":7,"name":"M. Torres","position":"RM","stats":{"pace":88,"shooting":74,"passing":69,"defending":31,"physicality":55,"composure":62},"strengths":["electric_pace"],"weaknesses":["poor_tracking_back","weak_foot_only"] },
+    { "id":"b8","num":8,"name":"P. Nkemdi","position":"CM","stats":{"pace":70,"shooting":58,"passing":74,"defending":65,"physicality":72,"composure":68},"strengths":["box_to_box_engine"],"weaknesses":["static_in_transition"] },
+    { "id":"b9","num":11,"name":"K. Solberg","position":"LM","stats":{"pace":82,"shooting":68,"passing":66,"defending":38,"physicality":58,"composure":60},"strengths":["electric_pace","long_range_shooter"],"weaknesses":["wilts_under_high_press"] },
+    { "id":"b10","num":9,"name":"A. Vidal","position":"ST","stats":{"pace":74,"shooting":86,"passing":60,"defending":22,"physicality":71,"composure":80},"strengths":["clinical_finisher","composed_finisher"],"weaknesses":["injury_prone"] },
+    { "id":"b11","num":10,"name":"E. Whitfield","position":"ST","stats":{"pace":79,"shooting":78,"passing":65,"defending":24,"physicality":60,"composure":63},"strengths":["clinical_finisher"],"weaknesses":["indecisive_in_box"] }
+  ]},
+  "red": { "name": "Solvane United", "color": "#D6373F", "players": [
+    { "id":"r1","num":1,"name":"H. Draskovic","position":"GK","stats":{"pace":42,"shooting":18,"passing":60,"defending":78,"physicality":74,"composure":75},"strengths":["quick_release_gk"],"weaknesses":[] },
+    { "id":"r2","num":2,"name":"B. Osei","position":"RB","stats":{"pace":84,"shooting":38,"passing":66,"defending":70,"physicality":66,"composure":60},"strengths":["overlap_specialist","electric_pace"],"weaknesses":["poor_tracking_back"] },
+    { "id":"r3","num":3,"name":"N. Larkin","position":"CB","stats":{"pace":58,"shooting":20,"passing":58,"defending":82,"physicality":85,"composure":72},"strengths":["aerial_threat"],"weaknesses":["slow_turning"] },
+    { "id":"r4","num":4,"name":"G. Pavlenko","position":"CB","stats":{"pace":55,"shooting":24,"passing":63,"defending":79,"physicality":80,"composure":68},"strengths":["leader","tackling_specialist"],"weaknesses":["short_fuse"] },
+    { "id":"r5","num":5,"name":"C. Moutinho","position":"LB","stats":{"pace":71,"shooting":30,"passing":64,"defending":74,"physicality":69,"composure":66},"strengths":["tackling_specialist"],"weaknesses":["weak_foot_only"] },
+    { "id":"r6","num":6,"name":"F. Aubert","position":"CM","stats":{"pace":62,"shooting":50,"passing":79,"defending":70,"physicality":68,"composure":73},"strengths":["press_resistant"],"weaknesses":["static_in_transition"] },
+    { "id":"r7","num":7,"name":"Y. Tanaka","position":"RM","stats":{"pace":85,"shooting":70,"passing":72,"defending":34,"physicality":52,"composure":65},"strengths":["electric_pace","vision_playmaker"],"weaknesses":["poor_tracking_back"] },
+    { "id":"r8","num":8,"name":"I. Kowalski","position":"CM","stats":{"pace":66,"shooting":60,"passing":76,"defending":62,"physicality":70,"composure":64},"strengths":["long_range_shooter"],"weaknesses":["rash_tackler"] },
+    { "id":"r9","num":11,"name":"S. Adeyemi","position":"LM","stats":{"pace":80,"shooting":66,"passing":68,"defending":36,"physicality":61,"composure":58},"strengths":["electric_pace"],"weaknesses":["wilts_under_high_press","weak_foot_only"] },
+    { "id":"r10","num":9,"name":"V. Petrov","position":"ST","stats":{"pace":70,"shooting":84,"passing":58,"defending":20,"physicality":78,"composure":76},"strengths":["aerial_threat","clinical_finisher"],"weaknesses":["injury_prone"] },
+    { "id":"r11","num":10,"name":"L. Ferreira","position":"ST","stats":{"pace":77,"shooting":80,"passing":63,"defending":22,"physicality":58,"composure":59},"strengths":["composed_finisher"],"weaknesses":["indecisive_in_box","short_fuse"] }
+  ]}
+};
+
+const TRAITS = {
+  strengths: {
+    clinical_finisher: "Rarely misses clear-cut chances", electric_pace: "Outruns most defenders in open play",
+    press_resistant: "Keeps the ball under close pressure", aerial_threat: "Wins headers, dangerous at set pieces",
+    vision_playmaker: "Picks out incisive through balls", tackling_specialist: "Wins clean one-on-one duels",
+    leader: "Lifts teammates in tight games", long_range_shooter: "Threatens from outside the box",
+    overlap_specialist: "Provides width and end product from fullback", composed_finisher: "Stays calm one-on-one with the keeper",
+    box_to_box_engine: "Covers ground, contributes both ends", quick_release_gk: "Distributes fast to start counters"
+  },
+  weaknesses: {
+    poor_tracking_back: "Doesn't recover defensively", weak_foot_only: "Heavily reliant on one foot",
+    wilts_under_high_press: "Loses composure vs aggressive pressing", weak_in_the_air: "Loses aerial duels",
+    slow_turning: "Struggles against pace in behind", rash_tackler: "Prone to fouls under pressure",
+    indecisive_in_box: "Hesitates on clear chances", poor_positioning: "Often out of position defensively",
+    injury_prone: "Fitness risk over a match", poor_distribution: "Gives possession away under pressure",
+    short_fuse: "Discipline risk, easily provoked", static_in_transition: "Slow to react when possession changes"
+  }
+};
+
+const pitch = document.getElementById('pitch');
+const coachFeed = document.getElementById('coachFeed');
+const scenarioBar = document.getElementById('scenarioBar');
+const overlay = document.getElementById('overlay');
+const playerCardEl = document.getElementById('playerCard');
+
+function xPositions(count){
+  if(count === 1) return [50];
+  const margin = 10;
+  const step = (100 - 2*margin) / (count - 1);
+  return Array.from({length:count}, (_, i) => Math.round(margin + i*step));
+}
+
+const LINES = { "442":[1,4,4,2], "433":[1,4,3,3], "352":[1,3,5,2], "532":[1,5,3,2] };
+const ROLE_NAMES = ["GK","DEF","MID","FWD"];
+const POS_BY_LINE = {
+  442: [["GK"],["RB","CB","CB","LB"],["RM","CM","CM","LM"],["ST","ST"]],
+  433: [["GK"],["RB","CB","CB","LB"],["CM","CM","CM"],["RM","ST","LM"]],
+  352: [["GK"],["CB","CB","CB"],["RM","CM","CM","CM","LM"],["ST","ST"]],
+  532: [["GK"],["RB","CB","CB","CB","LB"],["CM","CM","CM"],["ST","ST"]]
+};
+
+function buildFormation(code, side, teamId){
+  const lines = LINES[code];
+  const posLines = POS_BY_LINE[code];
+  const yLines = side === 'blue' ? [93,77,60,49] : [7,23,40,51];
+  const roster = PLAYER_DATA[teamId].players;
+  const outfield = roster.filter(p => p.position !== 'GK');
+  const gk = roster.find(p => p.position === 'GK');
+  let pool = [...outfield];
+  const pawns = [];
+
+  lines.forEach((count, li) => {
+    const xs = xPositions(count);
+    const wanted = posLines[li];
+    xs.forEach((x, i) => {
+      let player;
+      if(li === 0){
+        player = gk;
+      } else {
+        const want = wanted[i];
+        let idx = pool.findIndex(p => p.position === want);
+        if(idx === -1) idx = 0;
+        player = pool[idx];
+        pool.splice(idx, 1);
+      }
+      pawns.push({ x, y: yLines[li], role: ROLE_NAMES[li], player });
+    });
+  });
+  return pawns;
+}
+
+let blueTeam = buildFormation("442", "blue", "blue");
+let redTeam = buildFormation("442", "red", "red");
+let currentCode = "442";
+const pawnEls = { blue: [], red: [] };
+
+function renderTeam(list, data, color){
+  list.forEach(el => el.remove());
+  list.length = 0;
+  data.forEach(p => {
+    const div = document.createElement('div');
+    const isGK = p.player.position === 'GK';
+    div.className = 'pawn ' + (isGK ? 'gk' : color);
+    div.style.left = p.x + '%';
+    div.style.top = p.y + '%';
+    div.textContent = p.player.num;
+    pitch.appendChild(div);
+    list.push(div);
+    makeDraggable(div, p, color);
+  });
+}
+
+function makeDraggable(div, dataPoint, teamId){
+  let dragging = false;
+  let moved = false;
+  let startX, startY;
+
+  div.addEventListener('pointerdown', e => {
+    dragging = true; moved = false;
+    startX = e.clientX; startY = e.clientY;
+    div.setPointerCapture(e.pointerId);
+  });
+  div.addEventListener('pointermove', e => {
+    if(!dragging) return;
+    if(Math.abs(e.clientX - startX) > 3 || Math.abs(e.clientY - startY) > 3) moved = true;
+    const rect = pitch.getBoundingClientRect();
+    let x = ((e.clientX - rect.left) / rect.width) * 100;
+    let y = ((e.clientY - rect.top) / rect.height) * 100;
+    x = Math.max(3, Math.min(97, x));
+    y = Math.max(3, Math.min(97, y));
+    div.style.left = x + '%';
+    div.style.top = y + '%';
+    dataPoint.x = x; dataPoint.y = y;
+  });
+  div.addEventListener('pointerup', () => {
+    dragging = false;
+    if(!moved) openPlayerCard(dataPoint.player, teamId);
+  });
+  div.addEventListener('pointercancel', () => { dragging = false; });
+}
+
+function radarSVG(stats){
+  const axes = ["pace","shooting","passing","defending","physicality","composure"];
+  const labels = ["PAC","SHO","PAS","DEF","PHY","COM"];
+  const size = 190, cx = size/2, cy = size/2, r = 70;
+  const angle = i => (Math.PI * 2 * i / axes.length) - Math.PI/2;
+
+  const point = (i, val) => {
+    const dist = (val/100) * r;
+    return [cx + dist*Math.cos(angle(i)), cy + dist*Math.sin(angle(i))];
+  };
+
+  let rings = "";
+  [0.33,0.66,1].forEach(f => {
+    const pts = axes.map((_,i)=>{
+      const [x,y] = point(i, f*100);
+      return `${x},${y}`;
+    }).join(" ");
+    rings += `<polygon points="${pts}" fill="none" stroke="#2A3247" stroke-width="1"/>`;
+  });
+
+  const dataPts = axes.map((a,i)=>{
+    const [x,y] = point(i, stats[a]);
+    return `${x},${y}`;
+  }).join(" ");
+
+  let labelEls = "";
+  axes.forEach((a,i) => {
+    const [x,y] = point(i, 118);
+    labelEls += `<text x="${x}" y="${y}" fill="#8E96AA" font-size="10" font-family="IBM Plex Mono, monospace" text-anchor="middle" dominant-baseline="middle">${labels[i]}</text>`;
+  });
+
+  return `<svg width="${size}" height="${size}" viewBox="0 0 ${size} ${size}">
+    ${rings}
+    <polygon points="${dataPts}" fill="#F2B134" fill-opacity="0.28" stroke="#F2B134" stroke-width="1.5"/>
+    ${labelEls}
+  </svg>`;
+}
+
+function openPlayerCard(player, teamId){
+  const color = teamId === 'blue' ? 'var(--blue)' : 'var(--red)';
+  const strengthTags = player.strengths.map(s =>
+    `<span class="tag str" title="${TRAITS.strengths[s] || ''}">${s.replaceAll('_',' ')}</span>`
+  ).join('');
+  const weakTags = player.weaknesses.map(w =>
+    `<span class="tag weak" title="${TRAITS.weaknesses[w] || ''}">${w.replaceAll('_',' ')}</span>`
+  ).join('') || '<span class="tag weak" style="opacity:0.5;">none logged</span>';
+
+  playerCardEl.innerHTML = `
+    <div class="pc-top">
+      <div class="pc-num" style="background:${color};">${player.num}</div>
+      <div>
+        <div class="pc-name">${player.name}</div>
+        <div class="pc-pos">${player.position} · ${PLAYER_DATA[teamId].name}</div>
+      </div>
+      <button class="pc-close" id="pcClose">&times;</button>
+    </div>
+    <div class="radar-wrap">${radarSVG(player.stats)}</div>
+    <div class="tag-section">
+      <h4>Strengths</h4>${strengthTags}
+      <h4>Weaknesses</h4>${weakTags}
+    </div>
+  `;
+  overlay.classList.add('open');
+  document.getElementById('pcClose').addEventListener('click', () => overlay.classList.remove('open'));
+}
+overlay.addEventListener('click', e => { if(e.target === overlay) overlay.classList.remove('open'); });
+
+renderTeam(pawnEls.blue, blueTeam, 'blue');
+renderTeam(pawnEls.red, redTeam, 'red');
+
+document.querySelectorAll('#formationRow .pill-btn').forEach(btn => {
+  btn.addEventListener('click', () => {
+    document.querySelectorAll('#formationRow .pill-btn').forEach(b => b.classList.remove('active'));
+    btn.classList.add('active');
+    currentCode = btn.dataset.f;
+    blueTeam = buildFormation(currentCode, 'blue', 'blue');
+    renderTeam(pawnEls.blue, blueTeam, 'blue');
+  });
+});
+
+document.getElementById('resetBtn').addEventListener('click', () => {
+  currentCode = "442";
+  document.querySelectorAll('#formationRow .pill-btn').forEach(b => b.classList.remove('active'));
+  document.querySelector('#formationRow .pill-btn').classList.add('active');
+  blueTeam = buildFormation("442", "blue", "blue");
+  redTeam = buildFormation("442", "red", "red");
+  renderTeam(pawnEls.blue, blueTeam, 'blue');
+  renderTeam(pawnEls.red, redTeam, 'red');
+  scenarioBar.innerHTML = 'Set your shape, then ask the coach to see how <b>Solvane United</b> will try to break you down.';
+  coachFeed.innerHTML = '<div class="msg"><span class="who">COACH</span>Board reset. Rearrange your shape and ask again.</div>';
+});
+
+function findExploitableMatchup(attackers, defenders){
+  let best = null, bestScore = -1;
+  attackers.forEach(a => {
+    defenders.forEach(d => {
+      let score = 0; const reasons = [];
+      if(a.strengths.includes('electric_pace') && d.weaknesses.includes('slow_turning')){ score += 3; reasons.push('pace mismatch in behind'); }
+      if(a.strengths.includes('electric_pace') && d.weaknesses.includes('poor_tracking_back')){ score += 2; reasons.push('space left in the channel'); }
+      if((a.stats.pace - d.stats.pace) > 15){ score += 1; reasons.push('raw pace gap'); }
+      if(score > bestScore){ bestScore = score; best = { attacker:a, defender:d, score, reasons }; }
+    });
+  });
+  return bestScore > 0 ? best : null;
+}
+
+document.getElementById('askCoach').addEventListener('click', () => {
+  const outfieldBlue = blueTeam.filter(p => p.player.position !== 'GK').map(p => ({...p, x:p.x}));
+  const xs = outfieldBlue.map(p => p.x);
+  const widthSpread = Math.max(...xs) - Math.min(...xs);
+  const defendersBlue = blueTeam.filter(p => p.role === 'DEF');
+  const avgDefY = defendersBlue.reduce((s,p)=>s+p.y,0) / defendersBlue.length;
+
+  let opponentCode = widthSpread < 55 ? "433" : "352";
+  redTeam = buildFormation(opponentCode, 'red', 'red');
+  renderTeam(pawnEls.red, redTeam, 'red');
+  document.querySelectorAll('#formationRow .pill-btn').forEach(b=>{});
+
+  const redAttackers = PLAYER_DATA.red.players.filter(p => ["LM","RM","ST"].includes(p.position));
+  const blueDefenders = PLAYER_DATA.blue.players.filter(p => ["LB","RB","CB"].includes(p.position));
+  const matchup = findExploitableMatchup(redAttackers, blueDefenders);
+
+  const oppLabel = opponentCode.split('').join('-');
+  let feedHtml = '';
+
+  if(matchup){
+    feedHtml += `<div class="msg"><span class="who">OPPONENT MANAGER</span>We're shifting to a <b>${oppLabel}</b>. <b>${matchup.attacker.name}</b> will target <b>${matchup.defender.name}</b> — ${matchup.reasons.join(', ')}.</div>`;
+    feedHtml += `<div class="msg"><span class="who">COACH</span><b>${matchup.defender.name}</b> is tagged <b>${matchup.defender.weaknesses[0]?.replaceAll('_',' ') || 'exposed'}</b>, and <b>${matchup.attacker.name}</b> has <b>electric pace</b>. Tuck a midfielder in to cover that channel, or swap to a back five to add a covering body.</div>`;
+  } else {
+    feedHtml += `<div class="msg"><span class="who">OPPONENT MANAGER</span>We're shifting to a <b>${oppLabel}</b> to probe your shape.</div>`;
+    feedHtml += `<div class="msg"><span class="who">COACH</span>No obvious mismatch for them right now — your shape is holding up. Keep an eye on width if they push higher.</div>`;
+  }
+
+  if(widthSpread < 55){
+    feedHtml += `<div class="msg"><span class="who">COACH</span>Also — your shape is narrow (spread ${Math.round(widthSpread)}%). Wide players can isolate your fullbacks in space.</div>`;
+  }
+  if(avgDefY < 68){
+    feedHtml += `<div class="msg"><span class="who">COACH</span>Your back line is pushed high. A ball in behind could beat it for pace.</div>`;
+  }
+
+  coachFeed.insertAdjacentHTML('beforeend', feedHtml);
+  coachFeed.scrollTop = coachFeed.scrollHeight;
+
+  scenarioBar.innerHTML = matchup
+    ? `<b>${matchup.attacker.name}</b> vs <b>${matchup.defender.name}</b> is the matchup to watch this phase.`
+    : `Solvane United have reshaped into a <b>${oppLabel}</b>.`;
+});
+</script>
+</body>
+</html>

@@ -1,0 +1,14 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "underdog-coach"
+resolve_s3 = true
+s3_prefix = "underdog-coach"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "Stage=dev BedrockModelId=REPLACE_WITH_BEDROCK_MODEL_ID"
+
+[default.build.parameters]
+cached = true
+parallel = true

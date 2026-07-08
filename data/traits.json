@@ -1,0 +1,30 @@
+{
+  "strengths": {
+    "clinical_finisher": "Rarely misses clear-cut chances in the box",
+    "electric_pace": "Outruns most defenders in open play",
+    "press_resistant": "Keeps the ball under close pressure",
+    "aerial_threat": "Wins headers consistently, dangerous at set pieces",
+    "vision_playmaker": "Picks out incisive through balls and switches",
+    "tackling_specialist": "Wins the ball cleanly in one-on-one duels",
+    "leader": "Lifts teammates' performance in tight games",
+    "long_range_shooter": "Threatens from outside the box",
+    "overlap_specialist": "Provides width and end product from fullback",
+    "composed_finisher": "Stays calm one-on-one with the keeper",
+    "box_to_box_engine": "Covers ground and contributes at both ends",
+    "quick_release_gk": "Distributes fast to start counter-attacks"
+  },
+  "weaknesses": {
+    "poor_tracking_back": "Doesn't recover into defensive shape",
+    "weak_foot_only": "Heavily reliant on one foot",
+    "wilts_under_high_press": "Loses composure against aggressive pressing",
+    "weak_in_the_air": "Loses aerial duels",
+    "slow_turning": "Struggles against pace in behind",
+    "rash_tackler": "Prone to fouls and cards under pressure",
+    "indecisive_in_box": "Hesitates on clear chances",
+    "poor_positioning": "Often out of position defensively",
+    "injury_prone": "Fitness risk over the course of a match",
+    "poor_distribution": "Gives possession away under pressure",
+    "short_fuse": "Discipline risk, easily provoked",
+    "static_in_transition": "Slow to react when possession changes"
+  }
+}
