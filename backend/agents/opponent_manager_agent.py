@@ -6,11 +6,17 @@ the role of the AI opponent's manager: it commits to a counter-shape and
 a specific tactical instruction, grounded in the player_data tool rather
 than freeform football trivia.
 
-The deterministic scouting result (player_data.find_exploitable_matchup)
-is computed first and handed to the agent as the scouting report its plan
-must be built around, then returned unchanged as `target_matchup` - so the
-agent's narrative and the data-backed matchup can never disagree, and the
-UI always gets stable player ids to highlight.
+The scouting result (player_data.pick_rotating_matchup) is computed first
+and handed to the agent as the scouting report its plan must be built
+around, then returned unchanged as `target_matchup` - so the agent's
+narrative and the data-backed matchup can never disagree, and the UI
+always gets stable player ids to highlight.
+
+Uses the rotating picker (not the single-strongest-pair
+find_exploitable_matchup) so consecutive /opponent rounds don't keep
+naming the identical defender - that used to trip
+ProgressAgent.recurring_weakness() after just two rounds and permanently
+lock every later drill onto one matchup.
 """
 
 from pydantic import BaseModel, Field
@@ -102,6 +108,7 @@ def decide_counter_strategy(
     opponent_team_id: str,
     drill: dict | None = None,
     metrics: dict | None = None,
+    session=None,
 ) -> dict:
     """
     Orchestration entry point called by the backend API.
@@ -112,10 +119,14 @@ def decide_counter_strategy(
         situation is the context the plan must be committed within.
     metrics: optional deterministic cover metrics (board_metrics.threat_cover)
         for the drill's focus matchup - real scouting facts, not vibes.
+    session: optional ProgressAgent/DynamoProgressAgent - used to exclude the
+        immediately-preceding round's defender from this round's pick so
+        consecutive asks rotate instead of confirming the same one forever.
     Returns: { formation_code, instruction, narrative, raw_response,
                target_matchup, tool_calls, structured_ok }
     """
-    target_matchup = player_data.find_exploitable_matchup(opponent_team_id, user_team_id)
+    exclude = session.recent_round_defenders(n=1) if session else set()
+    target_matchup = player_data.pick_rotating_matchup(opponent_team_id, user_team_id, exclude_defender_ids=exclude)
     agent = build_agent()
 
     scouting_report = target_matchup if target_matchup else "No standout mismatch - use the scouting tool yourself."

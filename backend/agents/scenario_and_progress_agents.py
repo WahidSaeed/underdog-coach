@@ -108,6 +108,23 @@ class ProgressAgent:
     def recent_drill_defenders(self, n: int = 2) -> set:
         return {m["defender_id"] for m in self.drill_history[-n:] if m.get("defender_id")}
 
+    def recent_round_defenders(self, n: int = 1) -> set:
+        """
+        Defenders the Opponent Manager has targeted in the last n
+        /opponent rounds (self.history, populated by log_round) - mirrors
+        recent_drill_defenders but for live-scouting rounds rather than
+        drill design. Without this, decide_counter_strategy calling
+        find_exploitable_matchup directly named the identical defender on
+        every round (it's a pure function of two static rosters), which
+        fed recurring_weakness() two identical picks after just two
+        rounds and falsely locked every later drill onto that one matchup.
+        """
+        return {
+            r["matchup"].get("defender_id")
+            for r in self.history[-n:]
+            if r.get("matchup", {}).get("defender_id")
+        }
+
 
 class DynamoProgressAgent(ProgressAgent):
     """

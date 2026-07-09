@@ -12,6 +12,7 @@ storage backend underneath can change without touching agent code.
 """
 
 import json
+import random
 from pathlib import Path
 from typing import Optional
 
@@ -103,6 +104,36 @@ def find_exploitable_matchup(attacking_team: str, defending_team: str) -> dict:
     """
     Core scouting primitive used by the Opponent Manager Agent: the
     single strongest matchup. Returns {} if nothing obvious.
+
+    Deterministic on purpose - this is what the LLM's own scout_matchup
+    tool calls when it wants a definitive answer. Callers picking the
+    session's *ground-truth* target for a round should use
+    pick_rotating_matchup below instead, or every round would name the
+    identical defender (see its docstring).
     """
     matchups = find_exploitable_matchups(attacking_team, defending_team)
     return matchups[0] if matchups else {}
+
+
+def pick_rotating_matchup(
+    attacking_team: str, defending_team: str, exclude_defender_ids: set[str] = frozenset()
+) -> dict:
+    """
+    Like find_exploitable_matchup, but rotates: excludes recently-targeted
+    defenders when another viable candidate exists, then weights the
+    remaining pool toward the stronger mismatches rather than always
+    returning the single strongest pair.
+
+    find_exploitable_matchup(s) is a pure function of the two rosters, so
+    any caller that used it directly as a round's ground truth kept naming
+    the identical defender every time - harmless on its own, but it fed
+    ProgressAgent.recurring_weakness() two identical picks after just two
+    rounds and permanently latched every later /drill onto that one
+    matchup. Both the Match Director (drill design) and the Opponent
+    Manager (live scouting) should call this instead.
+    """
+    candidates = find_exploitable_matchups(attacking_team, defending_team)
+    if not candidates:
+        return {}
+    pool = [c for c in candidates if c["defender_id"] not in exclude_defender_ids] or candidates
+    return random.choices(pool, weights=[c["score"] for c in pool], k=1)[0]

@@ -22,8 +22,6 @@ too close to risk. Injecting the memory check into the prompt keeps the
 same "adaptive drill" story for one fewer LLM round-trip.
 """
 
-import random
-
 from pydantic import BaseModel, Field
 from strands import Agent, tool
 
@@ -107,17 +105,10 @@ def pick_target_matchup(session, user_team_id: str, opponent_team_id: str, recur
         session.record_drill(recurring)
         return recurring
 
-    candidates = player_data.find_exploitable_matchups(opponent_team_id, user_team_id)
-    if not candidates:
-        return {}
-
     recent = session.recent_drill_defenders(n=2)
-    pool = [c for c in candidates if c["defender_id"] not in recent] or candidates
-    # Weighted toward the stronger mismatches, but not deterministic -
-    # a single roster only has so many candidates, so pure "always
-    # strongest" would still repeat within a few drills.
-    choice = random.choices(pool, weights=[c["score"] for c in pool], k=1)[0]
-    session.record_drill(choice)
+    choice = player_data.pick_rotating_matchup(opponent_team_id, user_team_id, exclude_defender_ids=recent)
+    if choice:
+        session.record_drill(choice)
     return choice
 
 

@@ -194,6 +194,8 @@ def opponent(payload: FormationPayload):
     if payload.board and drill_context and drill_context.get("focus_matchup"):
         metrics = board_metrics.threat_cover(payload.board.model_dump(), drill_context["focus_matchup"])
 
+    session = _get_session(payload.session_id)
+
     try:
         strategy = _call_with_one_retry(
             opponent_manager_agent.decide_counter_strategy,
@@ -202,19 +204,20 @@ def opponent(payload: FormationPayload):
             opponent_team_id=payload.opponent_team,
             drill=drill_context,
             metrics=metrics,
+            session=session,
         )
         degraded = not strategy.get("structured_ok", True)
     except Exception as exc:
         logger.error("opponent agent failed twice, degrading: %s", exc)
-        target_matchup = player_data.find_exploitable_matchup(payload.opponent_team, payload.user_team)
+        target_matchup = player_data.pick_rotating_matchup(
+            payload.opponent_team, payload.user_team, exclude_defender_ids=session.recent_round_defenders(n=1)
+        )
         strategy = opponent_manager_agent.heuristic_fallback(
             user_formation=user_formation, target_matchup=target_matchup
         )
         degraded = True
 
     matchup = strategy["target_matchup"]
-
-    session = _get_session(payload.session_id)
     session.log_round(payload.formation_code, matchup)
     recurring = session.recurring_weakness()
 
