@@ -97,15 +97,21 @@ def heuristic_fallback(user_formation: dict, target_matchup: dict) -> dict:
 
 
 def decide_counter_strategy(
-    user_formation: dict, user_team_id: str, opponent_team_id: str, drill: dict | None = None
+    user_formation: dict,
+    user_team_id: str,
+    opponent_team_id: str,
+    drill: dict | None = None,
+    metrics: dict | None = None,
 ) -> dict:
     """
     Orchestration entry point called by the backend API.
 
     user_formation: { "code": "4-3-3", "width_spread": 62, "avg_def_line": 71 }
-    drill: optional { "scenario": str, "coaching_goal": str } from a prior
-        POST /drill call - when present, the Match Director's situation is
-        the context the plan must be committed within.
+    drill: optional { "scenario": str, "coaching_goal": str, "focus_matchup": dict }
+        from a prior POST /drill call - when present, the Match Director's
+        situation is the context the plan must be committed within.
+    metrics: optional deterministic cover metrics (board_metrics.threat_cover)
+        for the drill's focus matchup - real scouting facts, not vibes.
     Returns: { formation_code, instruction, narrative, raw_response,
                target_matchup, tool_calls, structured_ok }
     """
@@ -119,6 +125,11 @@ def decide_counter_strategy(
         if drill
         else ""
     )
+    if metrics is not None:
+        drill_context += (
+            f"Live cover on the targeted matchup: {metrics}. "
+            "Decide whether the original exploit still works, or commit to a different plan.\n"
+        )
     prompt = f"""
     {drill_context}The user's team ({user_team_id}) is set up in a {user_formation['code']}
     with a width spread of {user_formation['width_spread']} and an average

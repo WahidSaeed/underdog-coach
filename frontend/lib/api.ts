@@ -35,17 +35,28 @@ export function hasMatchup(m: MaybeMatchup | null | undefined): m is MatchupDeta
 
 export type CoachEmotionApi = "neutral" | "explaining" | "happy" | "worried" | "angry" | "celebrating";
 
+export type CoverMetrics = {
+  helpers_within_15: number;
+  nearest_helper_dist: number | null;
+  attacker_marked: boolean;
+  isolated: boolean;
+};
+
+export type CoachVerdict = "SOLVED" | "PARTIAL" | "EXPOSED";
+
 export type OpponentApiResponse = {
   opponent: OpponentPlan;
   target_matchup: MaybeMatchup;
   emotion: CoachEmotionApi;
   recurring_weakness: MatchupDetail | null;
+  metrics: CoverMetrics | null;
   degraded: boolean;
   tool_calls: string[];
 };
 
 export type CoachFeedbackApiResponse = {
   coach_feedback: string;
+  verdict: CoachVerdict | null;
   degraded: boolean;
   tool_calls: string[];
 };
@@ -55,9 +66,17 @@ export type DrillApiResponse = {
   coaching_goal: string;
   focus_note: string;
   focus_matchup: MaybeMatchup;
+  opponent_formation_code: string;
+  user_goals: number;
+  opponent_goals: number;
+  minute: number;
   tool_calls: string[];
   degraded: boolean;
 };
+
+export type BoardPawnIn = { id: string; x: number; y: number };
+
+export type DrillContext = { scenario: string; coaching_goal: string; focus_matchup: MaybeMatchup };
 
 export type FormationRequest = {
   session_id: string;
@@ -66,7 +85,8 @@ export type FormationRequest = {
   formation_code: string;
   width_spread: number;
   avg_def_line: number;
-  drill?: { scenario: string; coaching_goal: string } | null;
+  drill?: DrillContext | null;
+  board?: { blue: BoardPawnIn[]; red: BoardPawnIn[] } | null;
 };
 
 export type DrillRequest = {
@@ -81,6 +101,8 @@ export type CoachFeedbackRequest = {
   user_team: string;
   opponent: OpponentPlan;
   target_matchup: MaybeMatchup;
+  drill?: DrillContext | null;
+  metrics?: CoverMetrics | null;
 };
 
 export function getSessionId(): string {

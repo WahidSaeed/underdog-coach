@@ -4,11 +4,25 @@ import { useCallback, useMemo, useState } from "react";
 import Pitch from "@/components/Pitch";
 import PlayerCard from "@/components/PlayerCard";
 import CoachAvatar, { CoachEmotion } from "@/components/CoachAvatar";
-import { boardGeometry, buildFormation, evaluateBoard, FormationCode, Pawn } from "@/lib/engine";
+import { boardGeometry, buildFormation, evaluateBoard, FormationCode, Pawn, stageDrillBoard } from "@/lib/engine";
 import { Player, TeamId, TEAMS, overallRating } from "@/lib/data";
-import { askCoachFeedback, askDrill, askOpponent, DrillApiResponse, getSessionId, hasMatchup } from "@/lib/api";
+import {
+  askCoachFeedback,
+  askDrill,
+  askOpponent,
+  CoachVerdict,
+  DrillApiResponse,
+  getSessionId,
+  hasMatchup,
+} from "@/lib/api";
 
-type FeedMsg = { who: "OPPONENT" | "COACH" | "META"; text: string; id: number };
+type FeedMsg = { who: "OPPONENT" | "COACH" | "META"; text: string; id: number; verdict?: CoachVerdict | null };
+
+const VERDICT_COLOR: Record<CoachVerdict, string> = {
+  SOLVED: "var(--lime)",
+  PARTIAL: "#f0b83c",
+  EXPOSED: "#ff7a88",
+};
 
 // Small grey "tool call" lines in the feed - makes the agent's tool use
 // (scout_matchup, get_player_traits, ...) visible, not just its prose.
@@ -81,9 +95,12 @@ export default function Home() {
         difficulty: "medium",
       });
       setDrill(res);
-      setHighlightIds(
-        hasMatchup(res.focus_matchup) ? [res.focus_matchup.attacker_id, res.focus_matchup.defender_id] : []
-      );
+      const focus = hasMatchup(res.focus_matchup) ? res.focus_matchup : null;
+      setHighlightIds(focus ? [focus.attacker_id, focus.defender_id] : []);
+      const oppFormation: FormationCode = (FORMATIONS as string[]).includes(res.opponent_formation_code)
+        ? (res.opponent_formation_code as FormationCode)
+        : "433";
+      setRedPawns(stageDrillBoard({ opponent_formation_code: oppFormation }, focus, bluePawns));
       setEmotion("explaining");
       const prefix = res.degraded ? "⚠ SCRIPTED DRILL — " : "📋 New drill: ";
       setFeed((prev) => [
@@ -126,6 +143,13 @@ export default function Home() {
     try {
       const sessionId = getSessionId();
       const { widthSpread, avgDefLine } = boardGeometry(bluePawns);
+      const drillContext = drill
+        ? { scenario: drill.scenario, coaching_goal: drill.coaching_goal, focus_matchup: drill.focus_matchup }
+        : null;
+      const board = {
+        blue: bluePawns.map((p) => ({ id: p.player.id, x: p.x, y: p.y })),
+        red: redPawns.map((p) => ({ id: p.player.id, x: p.x, y: p.y })),
+      };
 
       const opp = await askOpponent({
         session_id: sessionId,
@@ -134,7 +158,8 @@ export default function Home() {
         formation_code: formation,
         width_spread: widthSpread,
         avg_def_line: avgDefLine,
-        drill: drill ? { scenario: drill.scenario, coaching_goal: drill.coaching_goal } : null,
+        drill: drillContext,
+        board,
       });
 
       const oppFormation: FormationCode = (FORMATIONS as string[]).includes(opp.opponent.formation_code)
@@ -154,12 +179,17 @@ export default function Home() {
         user_team: "blue",
         opponent: opp.opponent,
         target_matchup: opp.target_matchup,
+        drill: drillContext,
+        metrics: opp.metrics,
       });
       setFeed((prev) => [
         ...prev,
         ...toolCallMsgs(coach.tool_calls, Date.now() + 20),
-        { who: "COACH", text: coach.coach_feedback, id: Date.now() + 30 },
+        { who: "COACH", text: coach.coach_feedback, id: Date.now() + 30, verdict: coach.verdict },
       ]);
+      // The verdict is graded after the /opponent emotion already landed -
+      // let it win the avatar on SOLVED rather than the earlier read.
+      if (coach.verdict === "SOLVED") setEmotion("celebrating");
 
       if (opp.recurring_weakness) {
         const rw = opp.recurring_weakness;
@@ -216,6 +246,22 @@ export default function Home() {
           <div className="chev">
             <span className="display ital" style={{ fontSize: 15, fontWeight: 800, color: "var(--red)" }}>{TEAMS.red.name}</span>
           </div>
+          {drill && (
+            <div
+              className="chev"
+              style={{ borderColor: drill.opponent_goals > drill.user_goals ? "rgba(232,52,124,0.55)" : "rgba(216,239,61,0.45)" }}
+            >
+              <span
+                className="display ital"
+                style={{
+                  fontSize: 14, fontWeight: 800,
+                  color: drill.opponent_goals > drill.user_goals ? "var(--magenta)" : "var(--lime)",
+                }}
+              >
+                {TEAMS.blue.short} {drill.user_goals}–{drill.opponent_goals} {TEAMS.red.short} · {drill.minute}&apos;
+              </span>
+            </div>
+          )}
           <div className="chev" style={{ marginLeft: "auto" }}>
             <span className="display" style={{ fontSize: 13, fontWeight: 700, color: "var(--cyan)" }}>
               SQUAD {squadRating} · CHEM 78
@@ -291,6 +337,9 @@ export default function Home() {
                 <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.75)", marginTop: 4 }}>
                   Goal: {drill.coaching_goal}
                 </div>
+                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", fontStyle: "italic", marginTop: 4 }}>
+                  {drill.focus_note}
+                </div>
               </div>
             )}
 
@@ -349,8 +398,22 @@ export default function Home() {
                     animation: "slideRight 0.35s ease-out",
                   }}
                 >
-                  <span className="display ital" style={{ display: "block", fontSize: 11.5, fontWeight: 800, letterSpacing: "0.06em", color: m.who === "OPPONENT" ? "#ff7a88" : "var(--cyan)", marginBottom: 2 }}>
-                    {m.who === "OPPONENT" ? "OPPONENT MANAGER" : "COACH"}
+                  <span style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
+                    <span className="display ital" style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.06em", color: m.who === "OPPONENT" ? "#ff7a88" : "var(--cyan)" }}>
+                      {m.who === "OPPONENT" ? "OPPONENT MANAGER" : "COACH"}
+                    </span>
+                    {m.verdict && (
+                      <span
+                        className="display ital"
+                        style={{
+                          fontSize: 10, fontWeight: 800, letterSpacing: "0.06em",
+                          padding: "1px 6px", border: `1px solid ${VERDICT_COLOR[m.verdict]}`,
+                          color: VERDICT_COLOR[m.verdict],
+                        }}
+                      >
+                        {m.verdict}
+                      </span>
+                    )}
                   </span>
                   {m.text}
                 </div>

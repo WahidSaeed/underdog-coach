@@ -22,7 +22,7 @@ from pydantic import BaseModel
 
 from agents import coach_agent, match_director_agent, opponent_manager_agent
 from agents.scenario_and_progress_agents import get_progress_agent
-from tools import player_data
+from tools import board_metrics, player_data
 
 logger = logging.getLogger(__name__)
 
@@ -56,7 +56,7 @@ def _call_with_one_retry(fn, *args, **kwargs):
         return fn(*args, **kwargs)
 
 
-def _compute_emotion(matchup: dict, width_spread: float, avg_def_line: float) -> str:
+def _compute_emotion(matchup: dict, width_spread: float, avg_def_line: float, metrics: dict | None = None) -> str:
     """
     Deterministic severity -> emotion mapping, ported from
     frontend/lib/engine.ts (evaluateBoard). Kept server-side and
@@ -70,6 +70,13 @@ def _compute_emotion(matchup: dict, width_spread: float, avg_def_line: float) ->
     if avg_def_line < 68:
         severity += 1
 
+    if metrics is not None:
+        # A drill is active and we have real cover data - let it move the
+        # avatar's read, same deterministic-severity idea as above.
+        severity -= min(metrics.get("helpers_within_15", 0), 2)
+        if metrics.get("isolated"):
+            severity += 1
+
     if severity >= 4:
         return "angry"
     if severity >= 2:
@@ -82,6 +89,18 @@ def _compute_emotion(matchup: dict, width_spread: float, avg_def_line: float) ->
 class DrillContextIn(BaseModel):
     scenario: str
     coaching_goal: str
+    focus_matchup: dict[str, Any] = {}
+
+
+class BoardPawnIn(BaseModel):
+    id: str
+    x: float
+    y: float
+
+
+class BoardIn(BaseModel):
+    blue: list[BoardPawnIn]
+    red: list[BoardPawnIn]
 
 
 class FormationPayload(BaseModel):
@@ -92,6 +111,7 @@ class FormationPayload(BaseModel):
     width_spread: float
     avg_def_line: float
     drill: DrillContextIn | None = None
+    board: BoardIn | None = None
 
 
 class DrillPayload(BaseModel):
@@ -112,6 +132,8 @@ class CoachFeedbackPayload(BaseModel):
     user_team: str = "blue"
     opponent: OpponentPlanIn
     target_matchup: dict[str, Any] = {}
+    drill: DrillContextIn | None = None
+    metrics: dict[str, Any] | None = None
 
 
 @app.get("/roster/{team_id}")
@@ -149,6 +171,10 @@ def drill(payload: DrillPayload):
         "coaching_goal": brief["coaching_goal"],
         "focus_note": brief["focus_note"],
         "focus_matchup": brief["focus_matchup"] or {},
+        "opponent_formation_code": brief["opponent_formation_code"],
+        "user_goals": brief["user_goals"],
+        "opponent_goals": brief["opponent_goals"],
+        "minute": brief["minute"],
         "tool_calls": brief.get("tool_calls", []),
         "degraded": degraded,
     }
@@ -163,6 +189,10 @@ def opponent(payload: FormationPayload):
     }
     drill_context = payload.drill.model_dump() if payload.drill else None
 
+    metrics = None
+    if payload.board and drill_context and drill_context.get("focus_matchup"):
+        metrics = board_metrics.threat_cover(payload.board.model_dump(), drill_context["focus_matchup"])
+
     try:
         strategy = _call_with_one_retry(
             opponent_manager_agent.decide_counter_strategy,
@@ -170,6 +200,7 @@ def opponent(payload: FormationPayload):
             user_team_id=payload.user_team,
             opponent_team_id=payload.opponent_team,
             drill=drill_context,
+            metrics=metrics,
         )
         degraded = not strategy.get("structured_ok", True)
     except Exception as exc:
@@ -186,7 +217,7 @@ def opponent(payload: FormationPayload):
     session.log_round(payload.formation_code, matchup)
     recurring = session.recurring_weakness()
 
-    emotion = _compute_emotion(matchup, payload.width_spread, payload.avg_def_line)
+    emotion = _compute_emotion(matchup, payload.width_spread, payload.avg_def_line, metrics)
 
     return {
         "opponent": {
@@ -197,6 +228,7 @@ def opponent(payload: FormationPayload):
         "target_matchup": matchup,
         "emotion": emotion,
         "recurring_weakness": recurring,
+        "metrics": metrics,
         "degraded": degraded,
         "tool_calls": strategy.get("tool_calls", []),
     }
@@ -205,6 +237,7 @@ def opponent(payload: FormationPayload):
 @app.post("/coach-feedback")
 def coach_feedback(payload: CoachFeedbackPayload):
     opponent_strategy = payload.opponent.model_dump()
+    drill_context = payload.drill.model_dump() if payload.drill else None
 
     try:
         feedback = _call_with_one_retry(
@@ -212,15 +245,18 @@ def coach_feedback(payload: CoachFeedbackPayload):
             user_team_id=payload.user_team,
             opponent_strategy=opponent_strategy,
             matchup=payload.target_matchup,
+            drill=drill_context,
+            metrics=payload.metrics,
         )
         degraded = False
     except Exception as exc:
         logger.error("coach agent failed twice, degrading: %s", exc)
-        feedback = coach_agent.heuristic_fallback(payload.target_matchup)
+        feedback = coach_agent.heuristic_fallback(payload.target_matchup, metrics=payload.metrics)
         degraded = True
 
     return {
         "coach_feedback": feedback["text"],
+        "verdict": feedback.get("verdict"),
         "degraded": degraded,
         "tool_calls": feedback.get("tool_calls", []),
     }

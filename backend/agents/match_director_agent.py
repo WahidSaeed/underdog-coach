@@ -27,6 +27,7 @@ from strands import Agent, tool
 
 from agents import scenario_client
 from agents.model_config import build_model, tool_call_names
+from agents.opponent_manager_agent import DEFAULT_FORMATION, VALID_FORMATIONS
 from tools import player_data
 
 DEFAULT_DIFFICULTY = "medium"
@@ -41,6 +42,9 @@ writing to the scenario tool, passing the matchup you chose as the focus.
 Ground everything in real player data; never invent an attribute that
 isn't in the data.
 
+The numeric fields (score, minute) and formation are the source of truth -
+the scenario text must agree with them.
+
 Do not write any analysis, headers, or commentary in your reply - use
 the tools, then go directly to filling in the drill brief. coaching_goal
 and focus_note must each be one sentence; scenario must be 2-3 sentences.
@@ -53,6 +57,12 @@ class DrillBrief(BaseModel):
     focus_note: str = Field(
         description="One sentence: why this drill, referencing the matchup or recurring mistake."
     )
+    opponent_formation_code: str = Field(
+        description="Opponent shape for this situation. One of: 442, 433, 352, 532."
+    )
+    user_goals: int = Field(description="User team's current goals in the scenario, 0-9.")
+    opponent_goals: int = Field(description="Opponent's current goals, 0-9.")
+    minute: int = Field(description="Match minute the scenario starts at, 1-90.")
 
 
 def _build_tools(session, user_team_id: str, opponent_team_id: str, difficulty: str, remote_flag: dict):
@@ -84,9 +94,11 @@ def _build_tools(session, user_team_id: str, opponent_team_id: str, difficulty: 
 
 def build_agent(tools) -> Agent:
     return Agent(
-        # DrillBrief is three short sentences - 400 is already generous
-        # headroom, and every token saved matters against the 29s ceiling.
-        model=build_model(max_tokens=400, temperature=0.7),
+        # DrillBrief is now three short sentences plus four small structured
+        # fields - 450 gives that headroom without brushing the 29s ceiling
+        # (gotcha: if the Director starts flubbing fields, tighten the
+        # prompt or drop `minute` before raising this further).
+        model=build_model(max_tokens=450, temperature=0.7),
         system_prompt=SYSTEM_PROMPT,
         tools=tools,
     )
@@ -114,6 +126,11 @@ def heuristic_fallback(user_team_id: str, opponent_team_id: str, target_matchup:
         "coaching_goal": coaching_goal,
         "focus_note": focus_note,
         "focus_matchup": target_matchup,
+        # "chasing the game" is the most motivating default for a drill.
+        "opponent_formation_code": DEFAULT_FORMATION,
+        "user_goals": 0,
+        "opponent_goals": 1,
+        "minute": 78,
         "tool_calls": [],
         "structured_ok": False,
     }
@@ -174,11 +191,18 @@ def design_drill(session, user_team_id: str, opponent_team_id: str, difficulty: 
         ]
 
     if brief is not None:
+        formation = brief.opponent_formation_code if brief.opponent_formation_code in VALID_FORMATIONS else DEFAULT_FORMATION
         return {
             "scenario": brief.scenario,
             "coaching_goal": brief.coaching_goal,
             "focus_note": brief.focus_note,
             "focus_matchup": target_matchup,
+            # Never trust the model's arithmetic - clamp to the ranges the
+            # UI can render.
+            "opponent_formation_code": formation,
+            "user_goals": max(0, min(9, brief.user_goals)),
+            "opponent_goals": max(0, min(9, brief.opponent_goals)),
+            "minute": max(1, min(90, brief.minute)),
             "tool_calls": tool_calls,
             "structured_ok": True,
         }
