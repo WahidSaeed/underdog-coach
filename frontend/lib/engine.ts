@@ -1,4 +1,5 @@
 import { Player, TeamId, TEAMS } from "./data";
+import { MatchupDetail } from "./api";
 
 export type Pawn = {
   x: number; // percent
@@ -57,6 +58,35 @@ export function buildFormation(code: FormationCode, side: TeamId): Pawn[] {
     });
   });
   return pawns;
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+  return Math.min(hi, Math.max(lo, v));
+}
+
+// Stages the board for a new drill: reshapes red into the brief's
+// formation, then plants the focus attacker on the focus defender's
+// shoulder so the threat is physically visible, not just named in text.
+// Blue is never touched here - answering the drill with the user's
+// current shape is the exercise (see briefing design decision #3).
+export function stageDrillBoard(
+  drill: { opponent_formation_code: FormationCode },
+  focus: MatchupDetail | null,
+  bluePawns: Pawn[]
+): Pawn[] {
+  const red = buildFormation(drill.opponent_formation_code, "red");
+  if (!focus) return red;
+  const defender = bluePawns.find((p) => p.player.id === focus.defender_id);
+  const attackerIdx = red.findIndex((p) => p.player.id === focus.attacker_id);
+  if (defender && attackerIdx !== -1) {
+    // Plant the threat on the defender's shoulder: same channel, one stride upfield.
+    red[attackerIdx] = {
+      ...red[attackerIdx],
+      x: clamp(defender.x, 6, 94),
+      y: clamp(defender.y - 9, 5, 95),
+    };
+  }
+  return red;
 }
 
 export type Matchup = {
