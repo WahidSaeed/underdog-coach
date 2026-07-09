@@ -4,6 +4,12 @@ import { useCallback, useMemo, useState } from "react";
 import Pitch from "@/components/Pitch";
 import PlayerCard from "@/components/PlayerCard";
 import CoachAvatar, { CoachEmotion } from "@/components/CoachAvatar";
+import VerdictHero, { RoundState } from "@/components/coach/VerdictHero";
+import MatchupChip from "@/components/coach/MatchupChip";
+import ActivityTicker from "@/components/coach/ActivityTicker";
+import MatchReportDrawer from "@/components/coach/MatchReportDrawer";
+import { FeedMsg, POSTURE_LABEL } from "@/components/coach/theme";
+import { abstract, deriveHeadline } from "@/components/coach/derive";
 import { boardGeometry, buildFormation, evaluateBoard, FormationCode, Pawn, stageDrillBoard } from "@/lib/engine";
 import { Player, TeamId, TEAMS, overallRating } from "@/lib/data";
 import {
@@ -14,16 +20,8 @@ import {
   DrillApiResponse,
   getSessionId,
   hasMatchup,
-  Posture,
+  MatchupDetail,
 } from "@/lib/api";
-
-type FeedMsg = { who: "OPPONENT" | "COACH" | "META"; text: string; id: number; verdict?: CoachVerdict | null };
-
-const VERDICT_COLOR: Record<CoachVerdict, string> = {
-  SOLVED: "var(--lime)",
-  PARTIAL: "#f0b83c",
-  EXPOSED: "#ff7a88",
-};
 
 // Small grey "tool call" lines in the feed - makes the agent's tool use
 // (scout_matchup, get_player_traits, ...) visible, not just its prose.
@@ -36,13 +34,6 @@ function toolCallMsgs(toolCalls: string[], seed: number): FeedMsg[] {
 }
 
 const FORMATIONS: FormationCode[] = ["442", "433", "352", "532"];
-
-const POSTURE_LABEL: Record<Posture, string> = {
-  chasing: "CHASING",
-  protecting_lead: "PROTECTING LEAD",
-  pinned_back: "PINNED BACK",
-  balanced: "BALANCED",
-};
 
 export default function Home() {
   const [formation, setFormation] = useState<FormationCode>("442");
@@ -58,6 +49,24 @@ export default function Home() {
   const [drill, setDrill] = useState<DrillApiResponse | null>(null);
   const [drillLoading, setDrillLoading] = useState(false);
   const busy = thinking || drillLoading;
+
+  // Glance-panel state (see docs/BRIEFING-glance-ui.md) - `round` is only
+  // written once a full ask (opponent + coach-feedback) has resolved, so the
+  // hero never renders a stale verdict while `busy` is true.
+  const [round, setRound] = useState<RoundState>(null);
+  const [activeMatchup, setActiveMatchup] = useState<MatchupDetail | null>(null);
+  const [recurringWeakness, setRecurringWeakness] = useState<MatchupDetail | null>(null);
+  const [lastToolCalls, setLastToolCalls] = useState<string[]>([]);
+  const [idleWarning, setIdleWarning] = useState<string | null>(null);
+  const [drawerOpen, setDrawerOpen] = useState(false);
+  const [lastSeenFeedId, setLastSeenFeedId] = useState(0);
+  const lastFeedId = feed.length ? feed[feed.length - 1].id : 0;
+  const hasUnread = !drawerOpen && lastFeedId > lastSeenFeedId;
+
+  const openDrawer = () => {
+    setDrawerOpen(true);
+    setLastSeenFeedId(lastFeedId);
+  };
 
   const squadRating = useMemo(
     () => Math.round(TEAMS.blue.players.reduce((s, p) => s + overallRating(p.stats), 0) / TEAMS.blue.players.length),
@@ -87,12 +96,24 @@ export default function Home() {
     setEmotion("neutral");
     setDrill(null);
     setFeed([{ who: "COACH", text: "Board reset. Set your shape and ask again.", id: Date.now() }]);
+    setRound(null);
+    setActiveMatchup(null);
+    setRecurringWeakness(null);
+    setLastToolCalls([]);
+    setIdleWarning(null);
   };
 
   const newDrill = async () => {
     if (busy) return;
     setDrillLoading(true);
     setEmotion("explaining");
+    setIdleWarning(null);
+    setRound(null);
+    setRecurringWeakness(null);
+    // A new drill starts a new match report - carrying over the previous
+    // drill's transcript into the drawer would read as stale/confusing.
+    setFeed([]);
+    setLastSeenFeedId(0);
 
     try {
       const sessionId = getSessionId();
@@ -105,6 +126,8 @@ export default function Home() {
       setDrill(res);
       const focus = hasMatchup(res.focus_matchup) ? res.focus_matchup : null;
       setHighlightIds(focus ? [focus.attacker_id, focus.defender_id] : []);
+      setActiveMatchup(focus);
+      setLastToolCalls(res.tool_calls);
       const oppFormation: FormationCode = (FORMATIONS as string[]).includes(res.opponent_formation_code)
         ? (res.opponent_formation_code as FormationCode)
         : "433";
@@ -116,14 +139,13 @@ export default function Home() {
       setBluePawns(blue);
       setRedPawns(red);
       setEmotion("explaining");
-      const prefix = res.degraded ? "⚠ SCRIPTED DRILL — " : "📋 New drill: ";
-      setFeed((prev) => [
-        ...prev,
-        ...toolCallMsgs(res.tool_calls, Date.now()),
-        { who: "COACH", text: `${prefix}${res.scenario} Your goal: ${res.coaching_goal}`, id: Date.now() + 10 },
-      ]);
+      // The drill's own scenario prose used to also get pushed here as a
+      // duplicate COACH feed message - the drawer's pinned dossier is now
+      // the only place it's shown (briefing §3/§4 step 2).
+      setFeed((prev) => [...prev, ...toolCallMsgs(res.tool_calls, Date.now())]);
     } catch (err) {
       console.error("Drill API failed:", err);
+      setIdleWarning("Drill service unreachable — free play mode");
       setFeed((prev) => [
         ...prev,
         { who: "COACH", text: "⚠ Drill service unreachable — free play mode", id: Date.now() },
@@ -145,14 +167,42 @@ export default function Home() {
         id: Date.now() + i,
       })),
     ]);
-    setHighlightIds(verdict.matchup ? [verdict.matchup.attacker.id, verdict.matchup.defender.id] : []);
+    const matchupDetail: MatchupDetail | null = verdict.matchup
+      ? {
+          attacker_id: verdict.matchup.attacker.id,
+          attacker: verdict.matchup.attacker.name,
+          defender_id: verdict.matchup.defender.id,
+          defender: verdict.matchup.defender.name,
+          reasons: verdict.matchup.reasons,
+        }
+      : null;
+    setHighlightIds(matchupDetail ? [matchupDetail.attacker_id, matchupDetail.defender_id] : []);
+    setActiveMatchup(matchupDetail);
     setEmotion(verdict.emotion);
+    setLastToolCalls([]);
+    // Client engine's severity stands in for a graded verdict here - the
+    // hero must never silently show stale state after an API failure
+    // (briefing §4 step 5).
+    const mappedVerdict: CoachVerdict =
+      verdict.emotion === "celebrating" ? "SOLVED" : verdict.emotion === "explaining" ? "PARTIAL" : "EXPOSED";
+    setRound({
+      verdict: mappedVerdict,
+      emotion: null,
+      // The literal "⚠ OFFLINE READ" label must survive at glance level -
+      // it's one of the two non-negotiable degraded labels (briefing §1/§7).
+      headline: `⚠ OFFLINE READ — ${deriveHeadline(mappedVerdict, matchupDetail)}`,
+      degraded: true,
+    });
   };
 
   const askCoach = async () => {
-    if (busy) return;
+    if (busy || !drill) return;
     setThinking(true);
     setEmotion("explaining");
+    // Clear any previous verdict so the hero falls back to the drill-active
+    // (or idle) branch rather than showing a stale grade while busy
+    // (briefing gotcha #3).
+    setRound(null);
 
     try {
       const sessionId = getSessionId();
@@ -181,7 +231,16 @@ export default function Home() {
         : "433";
       setRedPawns(buildFormation(oppFormation, "red"));
       setEmotion(opp.emotion);
-      setHighlightIds(hasMatchup(opp.target_matchup) ? [opp.target_matchup.attacker_id, opp.target_matchup.defender_id] : []);
+      // Opponent's target_matchup wins the matchup-chip source of truth once
+      // it lands - it's the live threat, even if it differs from the drill's
+      // original focus (briefing gotcha #4).
+      const liveMatchup = hasMatchup(opp.target_matchup)
+        ? opp.target_matchup
+        : hasMatchup(drillContext?.focus_matchup ?? null)
+          ? (drillContext!.focus_matchup as MatchupDetail)
+          : null;
+      setHighlightIds(liveMatchup ? [liveMatchup.attacker_id, liveMatchup.defender_id] : []);
+      setActiveMatchup(liveMatchup);
       setFeed((prev) => [
         ...prev,
         ...toolCallMsgs(opp.tool_calls, Date.now()),
@@ -201,12 +260,20 @@ export default function Home() {
         ...toolCallMsgs(coach.tool_calls, Date.now() + 20),
         { who: "COACH", text: coach.coach_feedback, id: Date.now() + 30, verdict: coach.verdict },
       ]);
+      setLastToolCalls([...opp.tool_calls, ...coach.tool_calls]);
       // The verdict is graded after the /opponent emotion already landed -
       // let it win the avatar on SOLVED rather than the earlier read.
       if (coach.verdict === "SOLVED") setEmotion("celebrating");
+      setRound({
+        verdict: coach.verdict,
+        emotion: opp.emotion,
+        headline: coach.verdict ? deriveHeadline(coach.verdict, liveMatchup) : abstract(coach.coach_feedback),
+        degraded: opp.degraded || coach.degraded,
+      });
 
       if (opp.recurring_weakness) {
         const rw = opp.recurring_weakness;
+        setRecurringWeakness(rw);
         setFeed((prev) => [
           ...prev,
           {
@@ -324,30 +391,36 @@ export default function Home() {
             <div className="display ital" style={{ fontSize: 22, fontWeight: 800, color: "var(--lime)", lineHeight: 1 }}>
               THE GAFFER
             </div>
-            <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.82)", marginTop: -6 }}>
-              Reads your shape, reacts like it's matchday.
-            </div>
 
             <CoachAvatar emotion={busy ? "explaining" : emotion} />
 
+            <VerdictHero
+              drillActive={!!drill}
+              coachingGoal={drill ? abstract(drill.coaching_goal) : null}
+              round={round}
+              idleWarning={idleWarning}
+            />
+
+            <MatchupChip
+              matchup={activeMatchup}
+              recurringWeakness={recurringWeakness}
+              onClick={() => activeMatchup && setHighlightIds([activeMatchup.attacker_id, activeMatchup.defender_id])}
+            />
+
             {drill && (
-              <div
-                style={{
-                  background: "rgba(10,9,20,0.82)",
-                  border: `1px solid ${drill.degraded ? "rgba(232,52,124,0.55)" : "rgba(216,239,61,0.45)"}`,
-                  padding: "9px 11px",
-                }}
-              >
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
-                  <div
-                    className="display ital"
-                    style={{
-                      fontSize: 11.5, fontWeight: 800, letterSpacing: "0.06em",
-                      color: drill.degraded ? "#ff7a88" : "var(--lime)",
-                    }}
-                  >
-                    {drill.degraded ? "⚠ SCRIPTED DRILL" : "MATCHDAY SITUATION"}
-                  </div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+                <div
+                  style={{
+                    fontSize: 12,
+                    color: "rgba(255,255,255,0.9)",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                    whiteSpace: "nowrap",
+                  }}
+                >
+                  🎯 {abstract(drill.coaching_goal)}
+                </div>
+                <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
                   <span
                     className="display ital"
                     style={{
@@ -356,15 +429,20 @@ export default function Home() {
                       whiteSpace: "nowrap",
                     }}
                   >
-                    YOUR SHAPE: {POSTURE_LABEL[drill.user_posture]}
+                    {POSTURE_LABEL[drill.user_posture]}
                   </span>
-                </div>
-                <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>{drill.scenario}</div>
-                <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.75)", marginTop: 4 }}>
-                  Goal: {drill.coaching_goal}
-                </div>
-                <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", fontStyle: "italic", marginTop: 4 }}>
-                  {drill.focus_note}
+                  {drill.degraded && (
+                    <span
+                      className="display ital"
+                      style={{
+                        fontSize: 9.5, fontWeight: 800, letterSpacing: "0.05em",
+                        padding: "1px 6px", border: "1px solid var(--magenta)", color: "#ff7a88",
+                        whiteSpace: "nowrap",
+                      }}
+                    >
+                      ⚠ SCRIPTED DRILL
+                    </span>
+                  )}
                 </div>
               </div>
             )}
@@ -372,17 +450,18 @@ export default function Home() {
             <div style={{ display: "flex", gap: 8 }}>
               <button
                 onClick={askCoach}
-                disabled={busy}
+                disabled={busy || !drill}
+                title={!drill ? "Start a drill first" : undefined}
                 className="display ital"
                 style={{
                   fontSize: 15, fontWeight: 800, letterSpacing: "0.04em",
                   padding: "12px 0", flex: 1,
-                  cursor: busy ? "wait" : "pointer",
+                  cursor: busy ? "wait" : !drill ? "not-allowed" : "pointer",
                   background: "var(--lime)", color: "var(--lime-dark)",
                   border: "none",
                   clipPath: "polygon(3% 0, 100% 0, 97% 100%, 0 100%)",
                   transition: "filter 0.2s",
-                  filter: busy ? "saturate(0.5) brightness(0.85)" : "none",
+                  filter: busy || !drill ? "saturate(0.5) brightness(0.85)" : "none",
                 }}
               >
                 {thinking ? "READING THE GAME…" : "ASK THE COACH"}
@@ -406,48 +485,36 @@ export default function Home() {
               </button>
             </div>
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 7, overflowY: "auto", flex: 1, minHeight: 120, maxHeight: 260, paddingRight: 2 }}>
-              {feed.map((m) =>
-                m.who === "META" ? (
-                  <div key={m.id} style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", padding: "0 2px", fontStyle: "italic" }}>
-                    {m.text}
-                  </div>
-                ) : (
-                <div
-                  key={m.id}
+            <ActivityTicker toolCalls={lastToolCalls} busy={busy} />
+
+            <button
+              onClick={openDrawer}
+              className="display ital"
+              style={{
+                fontSize: 13, fontWeight: 800, letterSpacing: "0.05em",
+                padding: "9px 0",
+                display: "flex", alignItems: "center", justifyContent: "center", gap: 8,
+                background: "rgba(10,9,20,0.55)",
+                color: "var(--text)",
+                border: "1px solid rgba(255,255,255,0.25)",
+                clipPath: "polygon(3% 0, 100% 0, 97% 100%, 0 100%)",
+                cursor: "pointer",
+              }}
+            >
+              MATCH REPORT
+              {hasUnread && (
+                <span
                   style={{
-                    background: "rgba(10,9,20,0.82)",
-                    border: `1px solid ${m.who === "OPPONENT" ? "rgba(224,55,74,0.55)" : "rgba(255,255,255,0.12)"}`,
-                    padding: "8px 11px",
-                    fontSize: 12.5,
-                    lineHeight: 1.5,
-                    animation: "slideRight 0.35s ease-out",
+                    width: 7, height: 7, borderRadius: "50%",
+                    background: "var(--lime)", boxShadow: "0 0 6px var(--lime)",
                   }}
-                >
-                  <span style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2 }}>
-                    <span className="display ital" style={{ fontSize: 11.5, fontWeight: 800, letterSpacing: "0.06em", color: m.who === "OPPONENT" ? "#ff7a88" : "var(--cyan)" }}>
-                      {m.who === "OPPONENT" ? "OPPONENT MANAGER" : "COACH"}
-                    </span>
-                    {m.verdict && (
-                      <span
-                        className="display ital"
-                        style={{
-                          fontSize: 10, fontWeight: 800, letterSpacing: "0.06em",
-                          padding: "1px 6px", border: `1px solid ${VERDICT_COLOR[m.verdict]}`,
-                          color: VERDICT_COLOR[m.verdict],
-                        }}
-                      >
-                        {m.verdict}
-                      </span>
-                    )}
-                  </span>
-                  {m.text}
-                </div>
-                )
+                />
               )}
-            </div>
+            </button>
           </aside>
         </div>
+
+        <MatchReportDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} drill={drill} feed={feed} />
 
         {/* FIFA bottom nav: formation tiles */}
         <nav style={{ display: "flex", gap: 8, marginTop: 18, animation: "riseIn 0.7s ease-out" }}>
