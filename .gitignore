@@ -3,6 +3,8 @@ backend/data/
 __pycache__/
 *.pyc
 .env
+.env.local
+.venv/
 node_modules/
 .next/
 out/

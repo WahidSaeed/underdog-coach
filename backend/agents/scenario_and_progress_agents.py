@@ -8,6 +8,8 @@ grows past a screen or two.
 
 import os
 from strands import Agent, tool
+
+from agents.model_config import build_model
 from tools import player_data
 
 # ---------------------------------------------------------------------
@@ -32,7 +34,11 @@ def get_roster(team_id: str) -> dict:
 
 
 def build_scenario_agent() -> Agent:
-    return Agent(system_prompt=SCENARIO_PROMPT, tools=[get_roster])
+    return Agent(
+        model=build_model(max_tokens=200, temperature=0.8),
+        system_prompt=SCENARIO_PROMPT,
+        tools=[get_roster],
+    )
 
 
 def generate_scenario(team_a: str, team_b: str, difficulty: str = "medium") -> str:

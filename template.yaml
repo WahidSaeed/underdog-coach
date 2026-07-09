@@ -20,8 +20,12 @@ Parameters:
 
 Globals:
   Function:
-    Timeout: 30
-    MemorySize: 512
+    # API Gateway HTTP API's own integration timeout is a hard ~29-30s,
+    # so this Timeout can't save a slow request from a client-visible
+    # 504 - it only protects against the Lambda dying mid-flight after
+    # API Gateway has already given up.
+    Timeout: 60
+    MemorySize: 1024
     Runtime: python3.12
     Architectures: [x86_64]
 

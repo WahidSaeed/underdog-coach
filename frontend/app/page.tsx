@@ -4,10 +4,21 @@ import { useCallback, useMemo, useState } from "react";
 import Pitch from "@/components/Pitch";
 import PlayerCard from "@/components/PlayerCard";
 import CoachAvatar, { CoachEmotion } from "@/components/CoachAvatar";
-import { buildFormation, evaluateBoard, FormationCode, Pawn } from "@/lib/engine";
+import { boardGeometry, buildFormation, evaluateBoard, FormationCode, Pawn } from "@/lib/engine";
 import { Player, TeamId, TEAMS, overallRating } from "@/lib/data";
+import { askCoachFeedback, askOpponent, getSessionId, hasMatchup } from "@/lib/api";
 
-type FeedMsg = { who: "OPPONENT" | "COACH"; text: string; id: number };
+type FeedMsg = { who: "OPPONENT" | "COACH" | "META"; text: string; id: number };
+
+// Small grey "tool call" lines in the feed - makes the agent's tool use
+// (scout_matchup, get_player_traits, ...) visible, not just its prose.
+function toolCallMsgs(toolCalls: string[], seed: number): FeedMsg[] {
+  return toolCalls.map((name, i) => ({
+    who: "META",
+    text: `🔍 scouted via ${name}(...)`,
+    id: seed + i,
+  }));
+}
 
 const FORMATIONS: FormationCode[] = ["442", "433", "352", "532"];
 
@@ -52,19 +63,80 @@ export default function Home() {
     setFeed([{ who: "COACH", text: "Board reset. Set your shape and ask again.", id: Date.now() }]);
   };
 
-  const askCoach = () => {
+  const runOfflineFallback = (reason: unknown) => {
+    console.error("Coach API failed, falling back to offline read:", reason);
+    const verdict = evaluateBoard(bluePawns);
+    setRedPawns(buildFormation(verdict.opponentFormation, "red"));
+    setFeed((prev) => [
+      ...prev,
+      ...verdict.messages.map((m, i) => ({
+        who: m.who,
+        text: i === 0 ? `⚠ OFFLINE READ — ${m.text}` : m.text,
+        id: Date.now() + i,
+      })),
+    ]);
+    setHighlightIds(verdict.matchup ? [verdict.matchup.attacker.id, verdict.matchup.defender.id] : []);
+    setEmotion(verdict.emotion);
+  };
+
+  const askCoach = async () => {
     if (thinking) return;
     setThinking(true);
     setEmotion("explaining");
-    // Production: POST to /coach (backend/main.py). Delay stands in for the round-trip.
-    setTimeout(() => {
-      const verdict = evaluateBoard(bluePawns);
-      setRedPawns(buildFormation(verdict.opponentFormation, "red"));
-      setFeed((prev) => [...prev, ...verdict.messages.map((m, i) => ({ ...m, id: Date.now() + i }))]);
-      setHighlightIds(verdict.matchup ? [verdict.matchup.attacker.id, verdict.matchup.defender.id] : []);
-      setEmotion(verdict.emotion);
+
+    try {
+      const sessionId = getSessionId();
+      const { widthSpread, avgDefLine } = boardGeometry(bluePawns);
+
+      const opp = await askOpponent({
+        session_id: sessionId,
+        user_team: "blue",
+        opponent_team: "red",
+        formation_code: formation,
+        width_spread: widthSpread,
+        avg_def_line: avgDefLine,
+      });
+
+      const oppFormation: FormationCode = (FORMATIONS as string[]).includes(opp.opponent.formation_code)
+        ? (opp.opponent.formation_code as FormationCode)
+        : "433";
+      setRedPawns(buildFormation(oppFormation, "red"));
+      setEmotion(opp.emotion);
+      setHighlightIds(hasMatchup(opp.target_matchup) ? [opp.target_matchup.attacker_id, opp.target_matchup.defender_id] : []);
+      setFeed((prev) => [
+        ...prev,
+        ...toolCallMsgs(opp.tool_calls, Date.now()),
+        { who: "OPPONENT", text: opp.opponent.narrative, id: Date.now() + 10 },
+      ]);
+
+      const coach = await askCoachFeedback({
+        session_id: sessionId,
+        user_team: "blue",
+        opponent: opp.opponent,
+        target_matchup: opp.target_matchup,
+      });
+      setFeed((prev) => [
+        ...prev,
+        ...toolCallMsgs(coach.tool_calls, Date.now() + 20),
+        { who: "COACH", text: coach.coach_feedback, id: Date.now() + 30 },
+      ]);
+
+      if (opp.recurring_weakness) {
+        const rw = opp.recurring_weakness;
+        setFeed((prev) => [
+          ...prev,
+          {
+            who: "COACH",
+            text: `That's twice now — ${rw.defender} keeps getting exposed there. Worth a permanent fix.`,
+            id: Date.now() + 2,
+          },
+        ]);
+      }
+    } catch (err) {
+      runOfflineFallback(err);
+    } finally {
       setThinking(false);
-    }, 900);
+    }
   };
 
   return (
@@ -177,7 +249,12 @@ export default function Home() {
             </button>
 
             <div style={{ display: "flex", flexDirection: "column", gap: 7, overflowY: "auto", flex: 1, minHeight: 120, maxHeight: 300, paddingRight: 2 }}>
-              {feed.map((m) => (
+              {feed.map((m) =>
+                m.who === "META" ? (
+                  <div key={m.id} style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", padding: "0 2px", fontStyle: "italic" }}>
+                    {m.text}
+                  </div>
+                ) : (
                 <div
                   key={m.id}
                   style={{
@@ -194,7 +271,8 @@ export default function Home() {
                   </span>
                   {m.text}
                 </div>
-              ))}
+                )
+              )}
             </div>
           </aside>
         </div>
@@ -227,7 +305,7 @@ export default function Home() {
           <span><span className="hint-key">◆</span>Drag to move</span>
           <span><span className="hint-key">▲</span>Ask the coach</span>
           <span style={{ marginLeft: "auto", fontSize: 11 }}>
-            Demo runs matchups client-side — production calls the Strands agents on Bedrock
+            Live: Strands agents on Amazon Bedrock — falls back to an offline read if the API is unreachable
           </span>
         </div>
       </main>

@@ -109,12 +109,20 @@ export type CoachVerdict = {
   matchup: Matchup | null;
 };
 
-export function evaluateBoard(bluePawns: Pawn[]): CoachVerdict {
+// Board geometry the backend also needs (POST /opponent payload) - kept
+// here so the API request body and the offline fallback compute it the
+// exact same way.
+export function boardGeometry(bluePawns: Pawn[]): { widthSpread: number; avgDefLine: number } {
   const outfield = bluePawns.filter((p) => p.player.position !== "GK");
   const xs = outfield.map((p) => p.x);
   const widthSpread = Math.max(...xs) - Math.min(...xs);
   const defenders = bluePawns.filter((p) => p.role === "DEF");
-  const avgDefY = defenders.reduce((s, p) => s + p.y, 0) / defenders.length;
+  const avgDefLine = defenders.reduce((s, p) => s + p.y, 0) / defenders.length;
+  return { widthSpread, avgDefLine };
+}
+
+export function evaluateBoard(bluePawns: Pawn[]): CoachVerdict {
+  const { widthSpread, avgDefLine: avgDefY } = boardGeometry(bluePawns);
 
   const opponentFormation: FormationCode = widthSpread < 55 ? "433" : "352";
   const matchup = findExploitableMatchup("red", "blue");

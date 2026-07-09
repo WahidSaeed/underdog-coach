@@ -8,6 +8,8 @@ advice feel like real coaching instead of generic tactics platitudes.
 """
 
 from strands import Agent, tool
+
+from agents.model_config import build_model, tool_call_names
 from tools import player_data
 
 SYSTEM_PROMPT = """
@@ -35,21 +37,39 @@ def explain_trait(trait: str) -> str:
 
 def build_agent() -> Agent:
     return Agent(
+        model=build_model(max_tokens=350, temperature=0.6),
         system_prompt=SYSTEM_PROMPT,
         tools=[get_player_traits, explain_trait],
     )
 
 
-def generate_feedback(user_team_id: str, opponent_strategy: dict, matchup: dict) -> str:
+def heuristic_fallback(matchup: dict) -> dict:
+    """Fully offline degrade path used when Bedrock is unreachable."""
+    if matchup:
+        reasons = ", ".join(matchup.get("reasons", [])) or "a mismatch our scouts flagged"
+        text = (
+            f"{matchup['defender']} is exposed here - {reasons}. Tuck a "
+            f"midfielder into that channel, or switch to a back five for cover."
+        )
+    else:
+        text = "No obvious mismatch for them right now - your shape is holding. Well done."
+    return {"text": text, "tool_calls": []}
+
+
+def generate_feedback(user_team_id: str, opponent_strategy: dict, matchup: dict) -> dict:
     """
     user_team_id: "blue"
-    opponent_strategy: output of opponent_manager_agent.decide_counter_strategy
-    matchup: the target_matchup dict (attacker/defender names + reasons)
+    opponent_strategy: { "formation_code", "instruction", "narrative" } - the
+        opponent agent's committed plan (see opponent_manager_agent.decide_counter_strategy)
+    matchup: the target_matchup dict (attacker/defender names + ids + reasons)
+
+    Returns: { "text": str, "tool_calls": list[str] }
     """
     agent = build_agent()
 
     prompt = f"""
-    The opponent has committed to this plan: {opponent_strategy.get('raw_response')}
+    The opponent has committed to this plan: {opponent_strategy.get('narrative')}
+    Their instruction to the team: {opponent_strategy.get('instruction')}
 
     The specific matchup they're targeting: {matchup}
 
@@ -58,4 +78,5 @@ def generate_feedback(user_team_id: str, opponent_strategy: dict, matchup: dict)
     or a substitution) that would neutralize it.
     """
 
-    return str(agent(prompt))
+    result = agent(prompt)
+    return {"text": str(result), "tool_calls": tool_call_names(result)}
