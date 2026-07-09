@@ -4,10 +4,21 @@ import { useCallback, useMemo, useState } from "react";
 import Pitch from "@/components/Pitch";
 import PlayerCard from "@/components/PlayerCard";
 import CoachAvatar, { CoachEmotion } from "@/components/CoachAvatar";
-import { buildFormation, evaluateBoard, FormationCode, Pawn } from "@/lib/engine";
+import { boardGeometry, buildFormation, evaluateBoard, FormationCode, Pawn } from "@/lib/engine";
 import { Player, TeamId, TEAMS, overallRating } from "@/lib/data";
+import { askCoachFeedback, askDrill, askOpponent, DrillApiResponse, getSessionId, hasMatchup } from "@/lib/api";
 
-type FeedMsg = { who: "OPPONENT" | "COACH"; text: string; id: number };
+type FeedMsg = { who: "OPPONENT" | "COACH" | "META"; text: string; id: number };
+
+// Small grey "tool call" lines in the feed - makes the agent's tool use
+// (scout_matchup, get_player_traits, ...) visible, not just its prose.
+function toolCallMsgs(toolCalls: string[], seed: number): FeedMsg[] {
+  return toolCalls.map((name, i) => ({
+    who: "META",
+    text: `🔍 scouted via ${name}(...)`,
+    id: seed + i,
+  }));
+}
 
 const FORMATIONS: FormationCode[] = ["442", "433", "352", "532"];
 
@@ -22,6 +33,9 @@ export default function Home() {
   const [highlightIds, setHighlightIds] = useState<string[]>([]);
   const [selected, setSelected] = useState<{ player: Player; team: TeamId } | null>(null);
   const [thinking, setThinking] = useState(false);
+  const [drill, setDrill] = useState<DrillApiResponse | null>(null);
+  const [drillLoading, setDrillLoading] = useState(false);
+  const busy = thinking || drillLoading;
 
   const squadRating = useMemo(
     () => Math.round(TEAMS.blue.players.reduce((s, p) => s + overallRating(p.stats), 0) / TEAMS.blue.players.length),
@@ -49,22 +63,120 @@ export default function Home() {
     setRedPawns(buildFormation("442", "red"));
     setHighlightIds([]);
     setEmotion("neutral");
+    setDrill(null);
     setFeed([{ who: "COACH", text: "Board reset. Set your shape and ask again.", id: Date.now() }]);
   };
 
-  const askCoach = () => {
-    if (thinking) return;
+  const newDrill = async () => {
+    if (busy) return;
+    setDrillLoading(true);
+    setEmotion("explaining");
+
+    try {
+      const sessionId = getSessionId();
+      const res = await askDrill({
+        session_id: sessionId,
+        user_team: "blue",
+        opponent_team: "red",
+        difficulty: "medium",
+      });
+      setDrill(res);
+      setHighlightIds(
+        hasMatchup(res.focus_matchup) ? [res.focus_matchup.attacker_id, res.focus_matchup.defender_id] : []
+      );
+      setEmotion("explaining");
+      const prefix = res.degraded ? "⚠ SCRIPTED DRILL — " : "📋 New drill: ";
+      setFeed((prev) => [
+        ...prev,
+        ...toolCallMsgs(res.tool_calls, Date.now()),
+        { who: "COACH", text: `${prefix}${res.scenario} Your goal: ${res.coaching_goal}`, id: Date.now() + 10 },
+      ]);
+    } catch (err) {
+      console.error("Drill API failed:", err);
+      setFeed((prev) => [
+        ...prev,
+        { who: "COACH", text: "⚠ Drill service unreachable — free play mode", id: Date.now() },
+      ]);
+    } finally {
+      setDrillLoading(false);
+    }
+  };
+
+  const runOfflineFallback = (reason: unknown) => {
+    console.error("Coach API failed, falling back to offline read:", reason);
+    const verdict = evaluateBoard(bluePawns);
+    setRedPawns(buildFormation(verdict.opponentFormation, "red"));
+    setFeed((prev) => [
+      ...prev,
+      ...verdict.messages.map((m, i) => ({
+        who: m.who,
+        text: i === 0 ? `⚠ OFFLINE READ — ${m.text}` : m.text,
+        id: Date.now() + i,
+      })),
+    ]);
+    setHighlightIds(verdict.matchup ? [verdict.matchup.attacker.id, verdict.matchup.defender.id] : []);
+    setEmotion(verdict.emotion);
+  };
+
+  const askCoach = async () => {
+    if (busy) return;
     setThinking(true);
     setEmotion("explaining");
-    // Production: POST to /coach (backend/main.py). Delay stands in for the round-trip.
-    setTimeout(() => {
-      const verdict = evaluateBoard(bluePawns);
-      setRedPawns(buildFormation(verdict.opponentFormation, "red"));
-      setFeed((prev) => [...prev, ...verdict.messages.map((m, i) => ({ ...m, id: Date.now() + i }))]);
-      setHighlightIds(verdict.matchup ? [verdict.matchup.attacker.id, verdict.matchup.defender.id] : []);
-      setEmotion(verdict.emotion);
+
+    try {
+      const sessionId = getSessionId();
+      const { widthSpread, avgDefLine } = boardGeometry(bluePawns);
+
+      const opp = await askOpponent({
+        session_id: sessionId,
+        user_team: "blue",
+        opponent_team: "red",
+        formation_code: formation,
+        width_spread: widthSpread,
+        avg_def_line: avgDefLine,
+        drill: drill ? { scenario: drill.scenario, coaching_goal: drill.coaching_goal } : null,
+      });
+
+      const oppFormation: FormationCode = (FORMATIONS as string[]).includes(opp.opponent.formation_code)
+        ? (opp.opponent.formation_code as FormationCode)
+        : "433";
+      setRedPawns(buildFormation(oppFormation, "red"));
+      setEmotion(opp.emotion);
+      setHighlightIds(hasMatchup(opp.target_matchup) ? [opp.target_matchup.attacker_id, opp.target_matchup.defender_id] : []);
+      setFeed((prev) => [
+        ...prev,
+        ...toolCallMsgs(opp.tool_calls, Date.now()),
+        { who: "OPPONENT", text: opp.opponent.narrative, id: Date.now() + 10 },
+      ]);
+
+      const coach = await askCoachFeedback({
+        session_id: sessionId,
+        user_team: "blue",
+        opponent: opp.opponent,
+        target_matchup: opp.target_matchup,
+      });
+      setFeed((prev) => [
+        ...prev,
+        ...toolCallMsgs(coach.tool_calls, Date.now() + 20),
+        { who: "COACH", text: coach.coach_feedback, id: Date.now() + 30 },
+      ]);
+
+      if (opp.recurring_weakness) {
+        const rw = opp.recurring_weakness;
+        setFeed((prev) => [
+          ...prev,
+          {
+            who: "COACH",
+            text: `That's twice now — ${rw.defender} keeps getting exposed there. Worth a permanent fix.`,
+            id: Date.now() + 2,
+          },
+        ]);
+      }
+    } catch (err) {
+      runOfflineFallback(err);
+    } finally {
       setThinking(false);
-    }, 900);
+    }
   };
 
   return (
@@ -156,28 +268,76 @@ export default function Home() {
               Reads your shape, reacts like it's matchday.
             </div>
 
-            <CoachAvatar emotion={thinking ? "explaining" : emotion} />
+            <CoachAvatar emotion={busy ? "explaining" : emotion} />
 
-            <button
-              onClick={askCoach}
-              disabled={thinking}
-              className="display ital"
-              style={{
-                fontSize: 17, fontWeight: 800, letterSpacing: "0.05em",
-                padding: "12px 0", width: "100%",
-                cursor: thinking ? "wait" : "pointer",
-                background: "var(--lime)", color: "var(--lime-dark)",
-                border: "none",
-                clipPath: "polygon(3% 0, 100% 0, 97% 100%, 0 100%)",
-                transition: "filter 0.2s",
-                filter: thinking ? "saturate(0.5) brightness(0.85)" : "none",
-              }}
-            >
-              {thinking ? "READING THE GAME…" : "ASK THE COACH"}
-            </button>
+            {drill && (
+              <div
+                style={{
+                  background: "rgba(10,9,20,0.82)",
+                  border: `1px solid ${drill.degraded ? "rgba(232,52,124,0.55)" : "rgba(216,239,61,0.45)"}`,
+                  padding: "9px 11px",
+                }}
+              >
+                <div
+                  className="display ital"
+                  style={{
+                    fontSize: 11.5, fontWeight: 800, letterSpacing: "0.06em",
+                    color: drill.degraded ? "#ff7a88" : "var(--lime)", marginBottom: 4,
+                  }}
+                >
+                  {drill.degraded ? "⚠ SCRIPTED DRILL" : "MATCHDAY SITUATION"}
+                </div>
+                <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>{drill.scenario}</div>
+                <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.75)", marginTop: 4 }}>
+                  Goal: {drill.coaching_goal}
+                </div>
+              </div>
+            )}
 
-            <div style={{ display: "flex", flexDirection: "column", gap: 7, overflowY: "auto", flex: 1, minHeight: 120, maxHeight: 300, paddingRight: 2 }}>
-              {feed.map((m) => (
+            <div style={{ display: "flex", gap: 8 }}>
+              <button
+                onClick={askCoach}
+                disabled={busy}
+                className="display ital"
+                style={{
+                  fontSize: 15, fontWeight: 800, letterSpacing: "0.04em",
+                  padding: "12px 0", flex: 1,
+                  cursor: busy ? "wait" : "pointer",
+                  background: "var(--lime)", color: "var(--lime-dark)",
+                  border: "none",
+                  clipPath: "polygon(3% 0, 100% 0, 97% 100%, 0 100%)",
+                  transition: "filter 0.2s",
+                  filter: busy ? "saturate(0.5) brightness(0.85)" : "none",
+                }}
+              >
+                {thinking ? "READING THE GAME…" : "ASK THE COACH"}
+              </button>
+              <button
+                onClick={newDrill}
+                disabled={busy}
+                className="display ital"
+                style={{
+                  fontSize: 15, fontWeight: 800, letterSpacing: "0.04em",
+                  padding: "12px 0", flex: 1,
+                  cursor: busy ? "wait" : "pointer",
+                  background: "var(--cyan)", color: "#062626",
+                  border: "none",
+                  clipPath: "polygon(3% 0, 100% 0, 97% 100%, 0 100%)",
+                  transition: "filter 0.2s",
+                  filter: busy ? "saturate(0.5) brightness(0.85)" : "none",
+                }}
+              >
+                {drillLoading ? "DESIGNING DRILL…" : "NEW DRILL"}
+              </button>
+            </div>
+
+            <div style={{ display: "flex", flexDirection: "column", gap: 7, overflowY: "auto", flex: 1, minHeight: 120, maxHeight: 260, paddingRight: 2 }}>
+              {feed.map((m) =>
+                m.who === "META" ? (
+                  <div key={m.id} style={{ fontSize: 11, color: "rgba(255,255,255,0.45)", padding: "0 2px", fontStyle: "italic" }}>
+                    {m.text}
+                  </div>
+                ) : (
                 <div
                   key={m.id}
                   style={{
@@ -194,7 +354,8 @@ export default function Home() {
                   </span>
                   {m.text}
                 </div>
-              ))}
+                )
+              )}
             </div>
           </aside>
         </div>
@@ -227,7 +388,7 @@ export default function Home() {
           <span><span className="hint-key">◆</span>Drag to move</span>
           <span><span className="hint-key">▲</span>Ask the coach</span>
           <span style={{ marginLeft: "auto", fontSize: 11 }}>
-            Demo runs matchups client-side — production calls the Strands agents on Bedrock
+            Live: Strands agents on Amazon Bedrock + AgentCore Runtime — falls back to an offline read if the API is unreachable
           </span>
         </div>
       </main>

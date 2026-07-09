@@ -8,6 +8,8 @@ grows past a screen or two.
 
 import os
 from strands import Agent, tool
+
+from agents.model_config import build_model
 from tools import player_data
 
 # ---------------------------------------------------------------------
@@ -32,12 +34,26 @@ def get_roster(team_id: str) -> dict:
 
 
 def build_scenario_agent() -> Agent:
-    return Agent(system_prompt=SCENARIO_PROMPT, tools=[get_roster])
+    return Agent(
+        # 320 not 200: measured the model occasionally ignore "keep it to 2
+        # sentences" and produce a longer, markdown-formatted reply, which at
+        # 200 hit Strands' MaxTokensReachedException (a hard error, not a
+        # graceful truncation) rather than just running long.
+        model=build_model(max_tokens=320, temperature=0.8),
+        system_prompt=SCENARIO_PROMPT,
+        tools=[get_roster],
+    )
 
 
-def generate_scenario(team_a: str, team_b: str, difficulty: str = "medium") -> str:
+def generate_scenario(focus: str, difficulty: str, team_a: str, team_b: str) -> str:
+    """
+    In-process scenario generation - the local mode of scenario_client.generate()
+    (no SCENARIO_AGENT_RUNTIME_ARN set) and the last-resort path if the
+    remote AgentCore call throws. `focus` names the matchup to build the
+    situation around, matching what the AgentCore container expects too.
+    """
     agent = build_scenario_agent()
-    prompt = f"Generate a {difficulty} scenario for {team_a} vs {team_b}."
+    prompt = f"Generate a {difficulty} scenario for {team_a} vs {team_b}, focused on: {focus}."
     return str(agent(prompt))
 
 

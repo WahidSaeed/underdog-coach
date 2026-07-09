@@ -1,8 +1,16 @@
 .aws-sam/
 backend/data/
+# written by `agentcore configure`/`deploy`; can embed account/ARN details
+.bedrock_agentcore.yaml
+.bedrock_agentcore/
 __pycache__/
 *.pyc
 .env
+.env.local
+# bakes in real AWS account id + ARNs via parameter_overrides once you've
+# deployed - copy samconfig.toml.example and fill in your own values.
+samconfig.toml
+.venv/
 node_modules/
 .next/
 out/
