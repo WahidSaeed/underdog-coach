@@ -157,8 +157,10 @@ export default function Home() {
 
   const runOfflineFallback = (reason: unknown) => {
     console.error("Coach API failed, falling back to offline read:", reason);
+    // Asking the coach grades the board as it stands - it must not reshuffle
+    // the opponent's positions out from under the explanation. Only NEW
+    // DRILL restages the board.
     const verdict = evaluateBoard(bluePawns);
-    setRedPawns(buildFormation(verdict.opponentFormation, "red"));
     setFeed((prev) => [
       ...prev,
       ...verdict.messages.map((m, i) => ({
@@ -226,10 +228,9 @@ export default function Home() {
         board,
       });
 
-      const oppFormation: FormationCode = (FORMATIONS as string[]).includes(opp.opponent.formation_code)
-        ? (opp.opponent.formation_code as FormationCode)
-        : "433";
-      setRedPawns(buildFormation(oppFormation, "red"));
+      // Asking the coach grades the board as it stands - it must not
+      // reshuffle the opponent's positions out from under the explanation.
+      // Only NEW DRILL restages the board.
       setEmotion(opp.emotion);
       // Opponent's target_matchup wins the matchup-chip source of truth once
       // it lands - it's the live threat, even if it differs from the drill's
