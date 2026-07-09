@@ -4,6 +4,12 @@
 
 const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "";
 const TIMEOUT_MS = 25_000;
+// /drill's nested delegation to the Scenario agent measured ~18-20s against
+// a live Bedrock backend in eu-central-1 (see git history / briefing) - the
+// shared 25s budget above cuts it too close, especially with Lambda cold
+// starts added on top once deployed. Give it its own longer budget, capped
+// just under API Gateway's hard ~29-30s integration ceiling.
+const DRILL_TIMEOUT_MS = 28_000;
 const SESSION_KEY = "uc-session";
 
 export type OpponentPlan = {
@@ -44,6 +50,15 @@ export type CoachFeedbackApiResponse = {
   tool_calls: string[];
 };
 
+export type DrillApiResponse = {
+  scenario: string;
+  coaching_goal: string;
+  focus_note: string;
+  focus_matchup: MaybeMatchup;
+  tool_calls: string[];
+  degraded: boolean;
+};
+
 export type FormationRequest = {
   session_id: string;
   user_team: string;
@@ -51,6 +66,14 @@ export type FormationRequest = {
   formation_code: string;
   width_spread: number;
   avg_def_line: number;
+  drill?: { scenario: string; coaching_goal: string } | null;
+};
+
+export type DrillRequest = {
+  session_id: string;
+  user_team: string;
+  opponent_team: string;
+  difficulty: string;
 };
 
 export type CoachFeedbackRequest = {
@@ -69,9 +92,9 @@ export function getSessionId(): string {
   return id;
 }
 
-async function postJson<T>(path: string, body: unknown): Promise<T> {
+async function postJson<T>(path: string, body: unknown, timeoutMs: number = TIMEOUT_MS): Promise<T> {
   const controller = new AbortController();
-  const timeout = setTimeout(() => controller.abort(), TIMEOUT_MS);
+  const timeout = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const res = await fetch(`${API_BASE}${path}`, {
       method: "POST",
@@ -92,4 +115,8 @@ export function askOpponent(payload: FormationRequest): Promise<OpponentApiRespo
 
 export function askCoachFeedback(payload: CoachFeedbackRequest): Promise<CoachFeedbackApiResponse> {
   return postJson<CoachFeedbackApiResponse>("/coach-feedback", payload);
+}
+
+export function askDrill(payload: DrillRequest): Promise<DrillApiResponse> {
+  return postJson<DrillApiResponse>("/drill", payload, DRILL_TIMEOUT_MS);
 }

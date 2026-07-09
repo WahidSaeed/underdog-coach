@@ -41,7 +41,7 @@ for a real agent response. The original static HTML prototype is kept at
 ```
 underdog-coach/
 ├── template.yaml                AWS SAM template: Lambda + API Gateway + DynamoDB + Bedrock IAM
-├── samconfig.toml                default `sam deploy` parameters
+├── samconfig.toml.example         template for `sam deploy` parameters — copy to samconfig.toml (gitignored)
 ├── Makefile                      build/deploy/local/destroy commands
 ├── frontend/                     Next.js app (FIFA-23-style UI, static export)
 │   ├── app/                      layout, page, global theme + animations
@@ -180,22 +180,14 @@ make local     # run against SAM's local Lambda emulator (needs Docker)
 make destroy   # tear the whole stack down
 ```
 
-**Deploying with a real `BedrockModelId`:** `samconfig.toml` ships with a
-placeholder (`REPLACE_WITH_BEDROCK_MODEL_ID`), deliberately not a real
-value — the real id is an ARN that embeds your AWS account id, which you
-don't want sitting in a public repo's history. Don't use
-`make deploy-guided` for this reason: `--guided` saves whatever you type
-at its prompts back into `samconfig.toml`, including the real id. Instead
-pass it as a one-off override, which SAM does **not** persist back to the
-file:
-
-```bash
-sam deploy --parameter-overrides "Stage=dev BedrockModelId=<your eu. inference profile id>"
-```
-
-If this is a private repo/account you don't mind identifying, it's fine
-to just edit the placeholder in `samconfig.toml` directly and use
-`make deploy` / `make deploy-guided` normally after that.
+**Deploying with a real `BedrockModelId` / `ScenarioAgentRuntimeArn`:**
+`samconfig.toml` is gitignored (copy `samconfig.toml.example` to
+`samconfig.toml` and fill in your own values), same pattern as
+`backend/.env` — both parameters are ARNs that embed your AWS account id,
+which you don't want sitting in a public repo's history. With your own
+`samconfig.toml` in place, `make deploy` / `make deploy-guided` work
+normally; `--guided` is safe here since it only writes back to your local,
+gitignored copy.
 
 `make build` copies `data/` into `backend/data/` before `sam build` since
 the Lambda's `CodeUri` is `backend/` — `player_data.py` checks both

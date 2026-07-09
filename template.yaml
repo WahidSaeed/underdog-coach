@@ -6,10 +6,6 @@ Description: >
   with a DynamoDB table for per-session coaching progress.
 
 Parameters:
-  Stage:
-    Type: String
-    Default: dev
-    Description: API Gateway stage name
   BedrockModelId:
     Type: String
     Default: REPLACE_WITH_BEDROCK_MODEL_ID
@@ -17,6 +13,14 @@ Parameters:
       Bedrock model id the Strands agents will call. Confirm the exact
       id for your region/access in the Bedrock console model catalog
       before deploying - don't rely on the placeholder default.
+  ScenarioAgentRuntimeArn:
+    Type: String
+    Default: ""
+    Description: >
+      ARN of the Scenario agent's Bedrock AgentCore Runtime deployment
+      (see agentcore/, deployed separately via `agentcore deploy`). Empty
+      default means the Match Director runs the Scenario agent in-process
+      instead of calling out to AgentCore Runtime.
 
 Globals:
   Function:
@@ -40,6 +44,7 @@ Resources:
         Variables:
           SESSION_TABLE: !Ref SessionTable
           BEDROCK_MODEL_ID: !Ref BedrockModelId
+          SCENARIO_AGENT_RUNTIME_ARN: !Ref ScenarioAgentRuntimeArn
       Policies:
         - DynamoDBCrudPolicy:
             TableName: !Ref SessionTable
@@ -48,6 +53,12 @@ Resources:
               Action:
                 - bedrock:InvokeModel
                 - bedrock:InvokeModelWithResponseStream
+              Resource: "*"
+            - Effect: Allow
+              Action:
+                - bedrock-agentcore:InvokeAgentRuntime
+              # Scoped to "*" for hackathon speed rather than the specific
+              # runtime ARN - tighten this before any non-demo deployment.
               Resource: "*"
       Events:
         ProxyRoot:
@@ -60,7 +71,11 @@ Resources:
   HttpApi:
     Type: AWS::Serverless::HttpApi
     Properties:
-      StageName: !Ref Stage
+      # $default (not a named stage like "dev") so the invoke URL has no
+      # stage path segment - a named stage would prefix every request path
+      # (e.g. /dev/roster/blue) and Mangum doesn't strip it, so FastAPI's
+      # router 404s on every route.
+      StageName: $default
       CorsConfiguration:
         AllowOrigins: ["*"]
         AllowMethods: ["GET", "POST", "OPTIONS"]
@@ -80,7 +95,7 @@ Resources:
 Outputs:
   ApiUrl:
     Description: Base URL for the Underdog Coach API
-    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com/${Stage}"
+    Value: !Sub "https://${HttpApi}.execute-api.${AWS::Region}.amazonaws.com"
   SessionTableName:
     Description: DynamoDB table storing per-session coaching progress
     Value: !Ref SessionTable

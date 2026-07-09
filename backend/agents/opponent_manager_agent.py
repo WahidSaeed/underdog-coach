@@ -96,11 +96,16 @@ def heuristic_fallback(user_formation: dict, target_matchup: dict) -> dict:
     }
 
 
-def decide_counter_strategy(user_formation: dict, user_team_id: str, opponent_team_id: str) -> dict:
+def decide_counter_strategy(
+    user_formation: dict, user_team_id: str, opponent_team_id: str, drill: dict | None = None
+) -> dict:
     """
     Orchestration entry point called by the backend API.
 
     user_formation: { "code": "4-3-3", "width_spread": 62, "avg_def_line": 71 }
+    drill: optional { "scenario": str, "coaching_goal": str } from a prior
+        POST /drill call - when present, the Match Director's situation is
+        the context the plan must be committed within.
     Returns: { formation_code, instruction, narrative, raw_response,
                target_matchup, tool_calls, structured_ok }
     """
@@ -108,8 +113,14 @@ def decide_counter_strategy(user_formation: dict, user_team_id: str, opponent_te
     agent = build_agent()
 
     scouting_report = target_matchup if target_matchup else "No standout mismatch - use the scouting tool yourself."
+    drill_context = (
+        f"The match situation: {drill['scenario']} Coaching goal: {drill['coaching_goal']} "
+        "Plan your counter within this situation.\n"
+        if drill
+        else ""
+    )
     prompt = f"""
-    The user's team ({user_team_id}) is set up in a {user_formation['code']}
+    {drill_context}The user's team ({user_team_id}) is set up in a {user_formation['code']}
     with a width spread of {user_formation['width_spread']} and an average
     defensive line height of {user_formation['avg_def_line']}.
 

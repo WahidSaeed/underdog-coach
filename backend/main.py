@@ -20,8 +20,8 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-from agents import coach_agent, opponent_manager_agent
-from agents.scenario_and_progress_agents import generate_scenario, get_progress_agent
+from agents import coach_agent, match_director_agent, opponent_manager_agent
+from agents.scenario_and_progress_agents import get_progress_agent
 from tools import player_data
 
 logger = logging.getLogger(__name__)
@@ -79,6 +79,11 @@ def _compute_emotion(matchup: dict, width_spread: float, avg_def_line: float) ->
     return "celebrating"
 
 
+class DrillContextIn(BaseModel):
+    scenario: str
+    coaching_goal: str
+
+
 class FormationPayload(BaseModel):
     session_id: str
     user_team: str = "blue"
@@ -86,6 +91,14 @@ class FormationPayload(BaseModel):
     formation_code: str
     width_spread: float
     avg_def_line: float
+    drill: DrillContextIn | None = None
+
+
+class DrillPayload(BaseModel):
+    session_id: str
+    user_team: str = "blue"
+    opponent_team: str = "red"
+    difficulty: str = "medium"
 
 
 class OpponentPlanIn(BaseModel):
@@ -106,9 +119,39 @@ def roster(team_id: str):
     return player_data.get_team(team_id)
 
 
-@app.get("/scenario")
-def scenario(team_a: str = "blue", team_b: str = "red", difficulty: str = "medium"):
-    return {"scenario": generate_scenario(team_a, team_b, difficulty)}
+@app.post("/drill")
+def drill(payload: DrillPayload):
+    session = _get_session(payload.session_id)
+
+    try:
+        brief = _call_with_one_retry(
+            match_director_agent.design_drill,
+            session=session,
+            user_team_id=payload.user_team,
+            opponent_team_id=payload.opponent_team,
+            difficulty=payload.difficulty,
+        )
+        degraded = not brief.get("structured_ok", True)
+    except Exception as exc:
+        logger.error("match director agent failed twice, degrading: %s", exc)
+        target_matchup = session.recurring_weakness() or player_data.find_exploitable_matchup(
+            payload.opponent_team, payload.user_team
+        )
+        brief = match_director_agent.heuristic_fallback(
+            user_team_id=payload.user_team,
+            opponent_team_id=payload.opponent_team,
+            target_matchup=target_matchup,
+        )
+        degraded = True
+
+    return {
+        "scenario": brief["scenario"],
+        "coaching_goal": brief["coaching_goal"],
+        "focus_note": brief["focus_note"],
+        "focus_matchup": brief["focus_matchup"] or {},
+        "tool_calls": brief.get("tool_calls", []),
+        "degraded": degraded,
+    }
 
 
 @app.post("/opponent")
@@ -118,6 +161,7 @@ def opponent(payload: FormationPayload):
         "width_spread": payload.width_spread,
         "avg_def_line": payload.avg_def_line,
     }
+    drill_context = payload.drill.model_dump() if payload.drill else None
 
     try:
         strategy = _call_with_one_retry(
@@ -125,6 +169,7 @@ def opponent(payload: FormationPayload):
             user_formation=user_formation,
             user_team_id=payload.user_team,
             opponent_team_id=payload.opponent_team,
+            drill=drill_context,
         )
         degraded = not strategy.get("structured_ok", True)
     except Exception as exc:

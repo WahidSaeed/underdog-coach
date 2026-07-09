@@ -1,0 +1,18 @@
+version = 0.1
+
+[default.deploy.parameters]
+stack_name = "underdog-coach"
+resolve_s3 = true
+s3_prefix = "underdog-coach"
+region = "eu-central-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+# BedrockModelId: eu. cross-region inference-profile id (or its full ARN)
+# from the Bedrock console - never a bare/global. id.
+# ScenarioAgentRuntimeArn: output of `agentcore deploy` from inside
+# agentcore/ - leave empty ("") to run the Scenario agent in-process.
+parameter_overrides = "BedrockModelId=\"REPLACE_WITH_BEDROCK_MODEL_ID\" ScenarioAgentRuntimeArn=\"\""
+
+[default.build.parameters]
+cached = true
+parallel = true

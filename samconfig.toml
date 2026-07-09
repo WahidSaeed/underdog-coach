@@ -7,7 +7,7 @@ s3_prefix = "underdog-coach"
 region = "eu-central-1"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = "Stage=dev BedrockModelId=REPLACE_WITH_BEDROCK_MODEL_ID"
+parameter_overrides = "BedrockModelId=\"arn:aws:bedrock:eu-central-1:705766749486:inference-profile/eu.anthropic.claude-sonnet-4-6\" ScenarioAgentRuntimeArn=\"arn:aws:bedrock-agentcore:eu-central-1:705766749486:runtime/scenario_agent-E5xxlM3HXT\""
 
 [default.build.parameters]
 cached = true
