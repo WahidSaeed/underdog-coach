@@ -14,6 +14,7 @@ import {
   DrillApiResponse,
   getSessionId,
   hasMatchup,
+  Posture,
 } from "@/lib/api";
 
 type FeedMsg = { who: "OPPONENT" | "COACH" | "META"; text: string; id: number; verdict?: CoachVerdict | null };
@@ -35,6 +36,13 @@ function toolCallMsgs(toolCalls: string[], seed: number): FeedMsg[] {
 }
 
 const FORMATIONS: FormationCode[] = ["442", "433", "352", "532"];
+
+const POSTURE_LABEL: Record<Posture, string> = {
+  chasing: "CHASING",
+  protecting_lead: "PROTECTING LEAD",
+  pinned_back: "PINNED BACK",
+  balanced: "BALANCED",
+};
 
 export default function Home() {
   const [formation, setFormation] = useState<FormationCode>("442");
@@ -100,7 +108,13 @@ export default function Home() {
       const oppFormation: FormationCode = (FORMATIONS as string[]).includes(res.opponent_formation_code)
         ? (res.opponent_formation_code as FormationCode)
         : "433";
-      setRedPawns(stageDrillBoard({ opponent_formation_code: oppFormation }, focus, bluePawns));
+      const { blue, red } = stageDrillBoard(
+        { opponent_formation_code: oppFormation, user_posture: res.user_posture },
+        focus,
+        formation
+      );
+      setBluePawns(blue);
+      setRedPawns(red);
       setEmotion("explaining");
       const prefix = res.degraded ? "⚠ SCRIPTED DRILL — " : "📋 New drill: ";
       setFeed((prev) => [
@@ -324,14 +338,26 @@ export default function Home() {
                   padding: "9px 11px",
                 }}
               >
-                <div
-                  className="display ital"
-                  style={{
-                    fontSize: 11.5, fontWeight: 800, letterSpacing: "0.06em",
-                    color: drill.degraded ? "#ff7a88" : "var(--lime)", marginBottom: 4,
-                  }}
-                >
-                  {drill.degraded ? "⚠ SCRIPTED DRILL" : "MATCHDAY SITUATION"}
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
+                  <div
+                    className="display ital"
+                    style={{
+                      fontSize: 11.5, fontWeight: 800, letterSpacing: "0.06em",
+                      color: drill.degraded ? "#ff7a88" : "var(--lime)",
+                    }}
+                  >
+                    {drill.degraded ? "⚠ SCRIPTED DRILL" : "MATCHDAY SITUATION"}
+                  </div>
+                  <span
+                    className="display ital"
+                    style={{
+                      fontSize: 9.5, fontWeight: 800, letterSpacing: "0.05em",
+                      padding: "1px 6px", border: "1px solid var(--cyan)", color: "var(--cyan)",
+                      whiteSpace: "nowrap",
+                    }}
+                  >
+                    YOUR SHAPE: {POSTURE_LABEL[drill.user_posture]}
+                  </span>
                 </div>
                 <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>{drill.scenario}</div>
                 <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.75)", marginTop: 4 }}>

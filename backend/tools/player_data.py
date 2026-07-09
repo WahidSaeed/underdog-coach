@@ -52,14 +52,16 @@ def trait_definition(trait: str) -> Optional[str]:
     return _TRAITS["strengths"].get(trait) or _TRAITS["weaknesses"].get(trait)
 
 
-def find_exploitable_matchup(attacking_team: str, defending_team: str) -> dict:
+def find_exploitable_matchups(attacking_team: str, defending_team: str) -> list[dict]:
     """
-    Core scouting primitive used by the Opponent Manager Agent.
+    Scores every attacker-vs-defender pair between the two rosters and
+    returns every mismatch with a positive score (pace mismatch, poor
+    tracking back, weak in the air, etc), sorted strongest-first.
 
-    Looks for defenders on defending_team who are tagged with a
-    weakness a winger/forward on attacking_team can exploit
-    (pace mismatch, poor tracking back, weak in the air, etc).
-    Returns the strongest matchup found, or {} if nothing obvious.
+    Returning the whole ranked list (not just the winner) lets callers
+    rotate through real matchups across repeated calls - see
+    match_director_agent.pick_target_matchup, which uses this so
+    consecutive drills don't all spotlight the identical defender.
     """
     attackers = [
         p for p in _PLAYER_DB[attacking_team]["players"]
@@ -70,8 +72,7 @@ def find_exploitable_matchup(attacking_team: str, defending_team: str) -> dict:
         if p["position"] in ("LB", "RB", "CB")
     ]
 
-    best = {}
-    best_score = -1
+    results = []
     for a in attackers:
         for d in defenders:
             score = 0
@@ -85,11 +86,23 @@ def find_exploitable_matchup(attacking_team: str, defending_team: str) -> dict:
             if a["stats"]["pace"] - d["stats"]["pace"] > 15:
                 score += 1
                 reasons.append("raw pace gap")
-            if score > best_score:
-                best_score = score
-                best = {
+            if score > 0:
+                results.append({
                     "attacker": a["name"], "attacker_id": a["id"],
                     "defender": d["name"], "defender_id": d["id"],
                     "score": score, "reasons": reasons
-                }
-    return best if best_score > 0 else {}
+                })
+    # Stable sort: ties keep their original (attacker, defender) iteration
+    # order, so find_exploitable_matchup below is unchanged for existing
+    # callers - it's just this function's first result.
+    results.sort(key=lambda m: m["score"], reverse=True)
+    return results
+
+
+def find_exploitable_matchup(attacking_team: str, defending_team: str) -> dict:
+    """
+    Core scouting primitive used by the Opponent Manager Agent: the
+    single strongest matchup. Returns {} if nothing obvious.
+    """
+    matchups = find_exploitable_matchups(attacking_team, defending_team)
+    return matchups[0] if matchups else {}

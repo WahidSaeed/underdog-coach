@@ -10,6 +10,9 @@ import math
 
 from tools import player_data
 
+# Cross-ref: frontend/lib/engine.ts ISOLATION_RADIUS (18) - staging must
+# clear helpers out past this radius, or a drill can start pre-SOLVED
+# (briefing gotcha #4). Keep this value <= that one if either changes.
 HELPER_RADIUS = 15
 MARK_RADIUS = 10
 

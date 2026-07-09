@@ -156,8 +156,8 @@ def drill(payload: DrillPayload):
         degraded = not brief.get("structured_ok", True)
     except Exception as exc:
         logger.error("match director agent failed twice, degrading: %s", exc)
-        target_matchup = session.recurring_weakness() or player_data.find_exploitable_matchup(
-            payload.opponent_team, payload.user_team
+        target_matchup = match_director_agent.pick_target_matchup(
+            session, payload.user_team, payload.opponent_team
         )
         brief = match_director_agent.heuristic_fallback(
             user_team_id=payload.user_team,
@@ -175,6 +175,7 @@ def drill(payload: DrillPayload):
         "user_goals": brief["user_goals"],
         "opponent_goals": brief["opponent_goals"],
         "minute": brief["minute"],
+        "user_posture": brief["user_posture"],
         "tool_calls": brief.get("tool_calls", []),
         "degraded": degraded,
     }

@@ -44,6 +44,8 @@ export type CoverMetrics = {
 
 export type CoachVerdict = "SOLVED" | "PARTIAL" | "EXPOSED";
 
+export type Posture = "chasing" | "protecting_lead" | "pinned_back" | "balanced";
+
 export type OpponentApiResponse = {
   opponent: OpponentPlan;
   target_matchup: MaybeMatchup;
@@ -70,6 +72,7 @@ export type DrillApiResponse = {
   user_goals: number;
   opponent_goals: number;
   minute: number;
+  user_posture: Posture;
   tool_calls: string[];
   degraded: boolean;
 };

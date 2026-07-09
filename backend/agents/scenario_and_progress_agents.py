@@ -73,6 +73,7 @@ class ProgressAgent:
     def __init__(self, session_id: str):
         self.session_id = session_id
         self.history: list[dict] = []
+        self.drill_history: list[dict] = []
 
     def log_round(self, formation_code: str, exploited_matchup: dict):
         self.history.append({
@@ -92,6 +93,21 @@ class ProgressAgent:
                 return round_data["matchup"]
         return None
 
+    def record_drill(self, matchup: dict):
+        """
+        Tracks which defender each `/drill` call has spotlighted. Used
+        by match_director_agent.pick_target_matchup so a fresh session
+        doesn't get the same matchup on every consecutive drill -
+        find_exploitable_matchups is a pure function of the two
+        rosters and would otherwise pick the identical strongest pair
+        every time, which reads as a static/broken demo.
+        """
+        if matchup:
+            self.drill_history.append(matchup)
+
+    def recent_drill_defenders(self, n: int = 2) -> set:
+        return {m["defender_id"] for m in self.drill_history[-n:] if m.get("defender_id")}
+
 
 class DynamoProgressAgent(ProgressAgent):
     """
@@ -109,13 +125,22 @@ class DynamoProgressAgent(ProgressAgent):
         existing = self._table.get_item(Key={"sessionId": session_id}).get("Item")
         if existing:
             self.history = existing.get("history", [])
+            self.drill_history = existing.get("drill_history", [])
 
-    def log_round(self, formation_code: str, exploited_matchup: dict):
-        super().log_round(formation_code, exploited_matchup)
+    def _save(self):
         self._table.put_item(Item={
             "sessionId": self.session_id,
             "history": self.history,
+            "drill_history": self.drill_history,
         })
+
+    def log_round(self, formation_code: str, exploited_matchup: dict):
+        super().log_round(formation_code, exploited_matchup)
+        self._save()
+
+    def record_drill(self, matchup: dict):
+        super().record_drill(matchup)
+        self._save()
 
 
 def get_progress_agent(session_id: str):

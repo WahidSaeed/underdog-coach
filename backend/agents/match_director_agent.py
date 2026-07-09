@@ -22,6 +22,8 @@ too close to risk. Injecting the memory check into the prompt keeps the
 same "adaptive drill" story for one fewer LLM round-trip.
 """
 
+import random
+
 from pydantic import BaseModel, Field
 from strands import Agent, tool
 
@@ -31,6 +33,9 @@ from agents.opponent_manager_agent import DEFAULT_FORMATION, VALID_FORMATIONS
 from tools import player_data
 
 DEFAULT_DIFFICULTY = "medium"
+
+VALID_POSTURES = {"chasing", "protecting_lead", "pinned_back", "balanced"}
+DEFAULT_POSTURE = "balanced"
 
 SYSTEM_PROMPT = """
 You design one training drill per request for an amateur football coach.
@@ -43,7 +48,12 @@ Ground everything in real player data; never invent an attribute that
 isn't in the data.
 
 The numeric fields (score, minute) and formation are the source of truth -
-the scenario text must agree with them.
+the scenario text must agree with them. user_posture must be consistent
+with the score, minute and scenario text (behind late -> usually chasing;
+ahead late -> protecting_lead or pinned_back). Vary the score, minute and
+posture across drills rather than defaulting to the same stoppage-time,
+one-goal-down situation every time - consecutive drills in a session
+should feel like different moments in different matches.
 
 Do not write any analysis, headers, or commentary in your reply - use
 the tools, then go directly to filling in the drill brief. coaching_goal
@@ -63,6 +73,52 @@ class DrillBrief(BaseModel):
     user_goals: int = Field(description="User team's current goals in the scenario, 0-9.")
     opponent_goals: int = Field(description="Opponent's current goals, 0-9.")
     minute: int = Field(description="Match minute the scenario starts at, 1-90.")
+    user_posture: str = Field(
+        description="The user team's game-state posture in this scenario. One of: "
+        "chasing (behind, pushed up), protecting_lead (ahead, dropped off), "
+        "pinned_back (under sustained pressure, very deep), balanced."
+    )
+
+
+def _derive_posture(user_goals: int, opponent_goals: int) -> str:
+    """Score-derived fallback for user_posture - used when the model omits
+    or hallucinates a value outside VALID_POSTURES (house rule #1: never
+    trust the model to pick a value outside the enum)."""
+    if user_goals < opponent_goals:
+        return "chasing"
+    if user_goals > opponent_goals:
+        return "protecting_lead"
+    return "balanced"
+
+
+def pick_target_matchup(session, user_team_id: str, opponent_team_id: str, recurring: dict | None = None) -> dict:
+    """
+    Chooses which matchup this drill teaches. A recorded recurring
+    weakness always wins - that's the point of session memory, keep
+    hammering a pattern the user genuinely hasn't fixed. Otherwise,
+    rotate through the scouted candidates: find_exploitable_matchup(s)
+    is a pure function of the two rosters, so without this it would
+    hand back the identical strongest pair on every consecutive drill -
+    fine functionally, but it makes a live demo look static/broken.
+    """
+    if recurring is None:
+        recurring = session.recurring_weakness()
+    if recurring:
+        session.record_drill(recurring)
+        return recurring
+
+    candidates = player_data.find_exploitable_matchups(opponent_team_id, user_team_id)
+    if not candidates:
+        return {}
+
+    recent = session.recent_drill_defenders(n=2)
+    pool = [c for c in candidates if c["defender_id"] not in recent] or candidates
+    # Weighted toward the stronger mismatches, but not deterministic -
+    # a single roster only has so many candidates, so pure "always
+    # strongest" would still repeat within a few drills.
+    choice = random.choices(pool, weights=[c["score"] for c in pool], k=1)[0]
+    session.record_drill(choice)
+    return choice
 
 
 def _build_tools(session, user_team_id: str, opponent_team_id: str, difficulty: str, remote_flag: dict):
@@ -131,6 +187,7 @@ def heuristic_fallback(user_team_id: str, opponent_team_id: str, target_matchup:
         "user_goals": 0,
         "opponent_goals": 1,
         "minute": 78,
+        "user_posture": _derive_posture(0, 1),
         "tool_calls": [],
         "structured_ok": False,
     }
@@ -144,7 +201,7 @@ def design_drill(session, user_team_id: str, opponent_team_id: str, difficulty: 
     Returns: { scenario, coaching_goal, focus_note, focus_matchup, tool_calls, structured_ok }
     """
     recurring = session.recurring_weakness()
-    target_matchup = recurring or player_data.find_exploitable_matchup(opponent_team_id, user_team_id)
+    target_matchup = pick_target_matchup(session, user_team_id, opponent_team_id, recurring)
 
     remote_flag = {"used_remote": False}
     tools = _build_tools(session, user_team_id, opponent_team_id, difficulty, remote_flag)
@@ -192,6 +249,9 @@ def design_drill(session, user_team_id: str, opponent_team_id: str, difficulty: 
 
     if brief is not None:
         formation = brief.opponent_formation_code if brief.opponent_formation_code in VALID_FORMATIONS else DEFAULT_FORMATION
+        user_goals = max(0, min(9, brief.user_goals))
+        opponent_goals = max(0, min(9, brief.opponent_goals))
+        posture = brief.user_posture if brief.user_posture in VALID_POSTURES else _derive_posture(user_goals, opponent_goals)
         return {
             "scenario": brief.scenario,
             "coaching_goal": brief.coaching_goal,
@@ -200,9 +260,10 @@ def design_drill(session, user_team_id: str, opponent_team_id: str, difficulty: 
             # Never trust the model's arithmetic - clamp to the ranges the
             # UI can render.
             "opponent_formation_code": formation,
-            "user_goals": max(0, min(9, brief.user_goals)),
-            "opponent_goals": max(0, min(9, brief.opponent_goals)),
+            "user_goals": user_goals,
+            "opponent_goals": opponent_goals,
             "minute": max(1, min(90, brief.minute)),
+            "user_posture": posture,
             "tool_calls": tool_calls,
             "structured_ok": True,
         }

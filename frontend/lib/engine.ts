@@ -1,5 +1,5 @@
 import { Player, TeamId, TEAMS } from "./data";
-import { MatchupDetail } from "./api";
+import { MatchupDetail, Posture } from "./api";
 
 export type Pawn = {
   x: number; // percent
@@ -64,20 +64,110 @@ function clamp(v: number, lo: number, hi: number): number {
   return Math.min(hi, Math.max(lo, v));
 }
 
-// Stages the board for a new drill: reshapes red into the brief's
-// formation, then plants the focus attacker on the focus defender's
-// shoulder so the threat is physically visible, not just named in text.
-// Blue is never touched here - answering the drill with the user's
-// current shape is the exercise (see briefing design decision #3).
+// Staging clears helpers out to this radius around the focus defender.
+// Cross-ref: backend/tools/board_metrics.py HELPER_RADIUS (15) - keep this
+// value >= that one, or a drill can start pre-SOLVED (briefing gotcha #4).
+const ISOLATION_RADIUS = 18;
+
+function dist(a: { x: number; y: number }, b: { x: number; y: number }): number {
+  return Math.hypot(a.x - b.x, a.y - b.y);
+}
+
+// Posture shift (blue only, outfield only - GK stays home, gotcha #3).
+// Blue moves upfield by *decreasing* y (gotcha #1) - don't reuse these
+// signs for red.
+function applyPostureShift(pawns: Pawn[], posture: Posture): Pawn[] {
+  return pawns.map((p) => {
+    if (p.role === "GK") return p;
+    let y: number;
+    if (posture === "chasing") {
+      y = p.role === "FWD" ? p.y - 6 : p.y - 10;
+    } else if (posture === "protecting_lead") {
+      y = p.y + 5;
+    } else if (posture === "pinned_back") {
+      y = p.role === "DEF" ? 84 : p.role === "MID" ? 72 : 58;
+    } else {
+      y = p.y;
+    }
+    return { ...p, y: clamp(y, 5, 95) };
+  });
+}
+
+// The pedagogical core: after the posture shift, pull the two nearest
+// helpers away from the focus defender so the drill starts visibly
+// broken (isolated = true), rather than pre-solved. Never moves the
+// defender himself (gotcha #2).
+function applyIsolationTransform(pawns: Pawn[], defenderId: string): Pawn[] {
+  const defenderIdx = pawns.findIndex((p) => p.player.id === defenderId);
+  if (defenderIdx === -1) return pawns;
+  const defender = pawns[defenderIdx];
+
+  const helperIdxs = pawns
+    .map((p, i) => ({ p, i }))
+    .filter(({ p, i }) => i !== defenderIdx && p.role !== "GK")
+    .sort((a, b) => dist(a.p, defender) - dist(b.p, defender))
+    .slice(0, 2)
+    .map(({ i }) => i);
+
+  const next = [...pawns];
+  for (const i of helperIdxs) {
+    const p = next[i];
+    // Pulled to the far half-space, caught upfield on the far side when
+    // possession turned.
+    next[i] = {
+      ...p,
+      x: clamp(100 - defender.x * 0.6, 10, 90),
+      y: clamp(p.y - 8, 5, 95),
+    };
+  }
+
+  // Verify: push anything still within ISOLATION_RADIUS back out radially.
+  for (const i of helperIdxs) {
+    const p = next[i];
+    const d = dist(p, defender);
+    if (d > 0 && d < ISOLATION_RADIUS) {
+      const scale = ISOLATION_RADIUS / d;
+      next[i] = {
+        ...p,
+        x: clamp(defender.x + (p.x - defender.x) * scale, 6, 94),
+        y: clamp(defender.y + (p.y - defender.y) * scale, 5, 95),
+      };
+    } else if (d === 0) {
+      next[i] = { ...p, x: clamp(defender.x + ISOLATION_RADIUS, 6, 94) };
+    }
+  }
+
+  return next;
+}
+
+// Stages the board for a new drill: rebuilds blue in the user's chosen
+// formation and repositions it for the scenario's posture (and, when a
+// focus matchup is set, isolates the focus defender), then reshapes red
+// into the brief's formation and plants the focus attacker on the
+// defender's shoulder. The team's explicit call: the drill depicts "how
+// the match got here", so it overwrites the user's dragged positions -
+// this supersedes the older "blue stays put" decision (see briefing
+// history note).
 export function stageDrillBoard(
-  drill: { opponent_formation_code: FormationCode },
+  drill: { opponent_formation_code: FormationCode; user_posture: Posture },
   focus: MatchupDetail | null,
-  bluePawns: Pawn[]
-): Pawn[] {
-  const red = buildFormation(drill.opponent_formation_code, "red");
-  if (!focus) return red;
-  const defender = bluePawns.find((p) => p.player.id === focus.defender_id);
-  const attackerIdx = red.findIndex((p) => p.player.id === focus.attacker_id);
+  userFormation: FormationCode
+): { blue: Pawn[]; red: Pawn[] } {
+  let blue = applyPostureShift(buildFormation(userFormation, "blue"), drill.user_posture);
+
+  if (focus) {
+    blue = applyIsolationTransform(blue, focus.defender_id);
+  }
+
+  let red = buildFormation(drill.opponent_formation_code, "red");
+  if (drill.user_posture === "pinned_back") {
+    // A team camped in its own third faces an opponent that has pushed
+    // up. Red moves upfield by *increasing* y (gotcha #1).
+    red = red.map((p) => (p.role === "GK" ? p : { ...p, y: clamp(p.y + 10, 5, 62) }));
+  }
+
+  const defender = blue.find((p) => p.player.id === focus?.defender_id);
+  const attackerIdx = red.findIndex((p) => p.player.id === focus?.attacker_id);
   if (defender && attackerIdx !== -1) {
     // Plant the threat on the defender's shoulder: same channel, one stride upfield.
     red[attackerIdx] = {
@@ -86,7 +176,8 @@ export function stageDrillBoard(
       y: clamp(defender.y - 9, 5, 95),
     };
   }
-  return red;
+
+  return { blue, red };
 }
 
 export type Matchup = {
