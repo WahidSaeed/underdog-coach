@@ -3,14 +3,13 @@
 A football tactics trainer: your formation and the AI
 opponent's counter both live on a fixed, deterministic slot grid — never
 free-hand pixels — and every turn is graded by a real rules engine
-(offside, marking, defensive-line shape, pressing traps), not by an LLM
-judging its own homework. A coach agent explains *why* a turn graded the
+(offside, marking, defensive-line shape, pressing traps). A coach agent explains *why* a turn graded the
 way it did, by player name and by trait, grounded in the same facts the
 scoring used.
 
 ## Submission overview
 
-**What does it do?** Underdog Coach is a chess-like football tactics
+**What does it do?** Underdog Coach is a football tactics
 trainer. You set a formation on a fixed grid; an Opponent Manager agent
 commits its own counter-formation and targets a real weakness on your
 roster; a Coach agent grades the turn and explains it — citing specific
