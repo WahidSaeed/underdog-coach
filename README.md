@@ -1,6 +1,6 @@
 # Underdog Coach
 
-A chess-like football tactics trainer: your formation and the AI
+A football tactics trainer: your formation and the AI
 opponent's counter both live on a fixed, deterministic slot grid — never
 free-hand pixels — and every turn is graded by a real rules engine
 (offside, marking, defensive-line shape, pressing traps), not by an LLM
