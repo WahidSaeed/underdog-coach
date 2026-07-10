@@ -1,20 +1,28 @@
 "use client";
 
-import { useEffect } from "react";
-import { DrillApiResponse } from "@/lib/api";
-import { FeedMsg, POSTURE_LABEL, VERDICT_COLOR } from "./theme";
+import { useEffect, useState } from "react";
+import { FeedMsg, VERDICT_COLOR } from "./theme";
+
+export type MatchDossier = {
+  scenario: string;
+  coaching_goal: string;
+  focus_note: string;
+  degraded: boolean;
+};
 
 type Props = {
   open: boolean;
   onClose: () => void;
-  drill: DrillApiResponse | null;
+  dossier: MatchDossier | null;
   feed: FeedMsg[];
 };
 
-// Layer 2 of the glance redesign (docs/BRIEFING-glance-ui.md): the full
-// agent transcript, one click away. The pinned dossier + feed-bubble JSX
-// below is moved from the old inline aside, not rewritten.
-export default function MatchReportDrawer({ open, onClose, drill, feed }: Props) {
+// Layer 2 of the glance redesign: the full agent transcript, one click
+// away. COACH bubbles with a `.detailed` field (agent_instruction.md item
+// 6) get a toggle to reveal the technical breakdown on demand.
+export default function MatchReportDrawer({ open, onClose, dossier, feed }: Props) {
+  const [expanded, setExpanded] = useState<Set<number>>(new Set());
+
   useEffect(() => {
     if (!open) return;
     const onKey = (e: KeyboardEvent) => {
@@ -23,6 +31,15 @@ export default function MatchReportDrawer({ open, onClose, drill, feed }: Props)
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  const toggle = (id: number) => {
+    setExpanded((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
 
   return (
     <>
@@ -81,45 +98,30 @@ export default function MatchReportDrawer({ open, onClose, drill, feed }: Props)
         </div>
 
         <div style={{ overflowY: "auto", flex: 1, padding: "14px 18px", display: "flex", flexDirection: "column", gap: 10 }}>
-          {drill && (
+          {dossier && (
             <div
               style={{
                 background: "rgba(10,9,20,0.82)",
-                border: `1px solid ${drill.degraded ? "rgba(232,52,124,0.55)" : "rgba(216,239,61,0.45)"}`,
+                border: `1px solid ${dossier.degraded ? "rgba(232,52,124,0.55)" : "rgba(216,239,61,0.45)"}`,
                 padding: "9px 11px",
               }}
             >
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 4 }}>
-                <div
-                  className="display ital"
-                  style={{
-                    fontSize: 11.5,
-                    fontWeight: 800,
-                    letterSpacing: "0.06em",
-                    color: drill.degraded ? "#ff7a88" : "var(--lime)",
-                  }}
-                >
-                  {drill.degraded ? "⚠ SCRIPTED DRILL" : "MATCHDAY SITUATION"}
-                </div>
-                <span
-                  className="display ital"
-                  style={{
-                    fontSize: 9.5,
-                    fontWeight: 800,
-                    letterSpacing: "0.05em",
-                    padding: "1px 6px",
-                    border: "1px solid var(--cyan)",
-                    color: "var(--cyan)",
-                    whiteSpace: "nowrap",
-                  }}
-                >
-                  YOUR SHAPE: {POSTURE_LABEL[drill.user_posture]}
-                </span>
+              <div
+                className="display ital"
+                style={{
+                  fontSize: 11.5,
+                  fontWeight: 800,
+                  letterSpacing: "0.06em",
+                  color: dossier.degraded ? "#ff7a88" : "var(--lime)",
+                  marginBottom: 4,
+                }}
+              >
+                {dossier.degraded ? "⚠ SCRIPTED DRILL" : "MATCHDAY SITUATION"}
               </div>
-              <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>{drill.scenario}</div>
-              <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.75)", marginTop: 4 }}>Goal: {drill.coaching_goal}</div>
+              <div style={{ fontSize: 12.5, lineHeight: 1.5 }}>{dossier.scenario}</div>
+              <div style={{ fontSize: 11.5, color: "rgba(255,255,255,0.75)", marginTop: 4 }}>Goal: {dossier.coaching_goal}</div>
               <div style={{ fontSize: 11, color: "rgba(255,255,255,0.6)", fontStyle: "italic", marginTop: 4 }}>
-                {drill.focus_note}
+                {dossier.focus_note}
               </div>
             </div>
           )}
@@ -170,6 +172,33 @@ export default function MatchReportDrawer({ open, onClose, drill, feed }: Props)
                   )}
                 </span>
                 {m.text}
+                {m.detailed && (
+                  <>
+                    <button
+                      onClick={() => toggle(m.id)}
+                      className="display ital"
+                      style={{
+                        display: "block",
+                        marginTop: 6,
+                        background: "none",
+                        border: "none",
+                        padding: 0,
+                        fontSize: 10.5,
+                        fontWeight: 800,
+                        letterSpacing: "0.04em",
+                        color: "var(--cyan)",
+                        cursor: "pointer",
+                      }}
+                    >
+                      {expanded.has(m.id) ? "HIDE TECHNICAL BREAKDOWN ▴" : "SHOW TECHNICAL BREAKDOWN ▾"}
+                    </button>
+                    {expanded.has(m.id) && (
+                      <div style={{ marginTop: 6, paddingTop: 6, borderTop: "1px solid var(--line)", fontSize: 12, color: "rgba(255,255,255,0.82)" }}>
+                        {m.detailed}
+                      </div>
+                    )}
+                  </>
+                )}
               </div>
             )
           )}

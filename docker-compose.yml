@@ -1,0 +1,23 @@
+# Local dev Postgres for the turn-based game state (matches/turns) and
+# coach feedback analysis - see backend/db/. Not used by the AWS deploy
+# path (template.yaml still runs DynamoDB there); this is local-dev only.
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: underdog-coach-postgres
+    environment:
+      POSTGRES_DB: underdog_coach
+      POSTGRES_USER: underdog
+      POSTGRES_PASSWORD: underdog_dev_pw
+    ports:
+      - "5432:5432"
+    volumes:
+      - underdog_pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U underdog -d underdog_coach"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+volumes:
+  underdog_pg_data:

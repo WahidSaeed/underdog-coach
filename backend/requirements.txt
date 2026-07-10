@@ -4,3 +4,5 @@ pydantic
 strands-agents==1.46.0
 boto3
 mangum
+sqlalchemy>=2.0
+psycopg[binary]>=3.1

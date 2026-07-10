@@ -10,11 +10,33 @@ import math
 
 from tools import player_data
 
-# Cross-ref: frontend/lib/engine.ts ISOLATION_RADIUS (18) - staging must
-# clear helpers out past this radius, or a drill can start pre-SOLVED
-# (briefing gotcha #4). Keep this value <= that one if either changes.
-HELPER_RADIUS = 15
-MARK_RADIUS = 10
+# Calibrated for the fixed slot grid (tools/grid_movement.py), not free
+# pixel coordinates - adjacent grid squares are themselves 16-40 units
+# apart (e.g. two adjacent defenders in a back-4 are ~27 apart), so the
+# old free-drag-era radii (15/10) made every formation read as
+# permanently isolated regardless of the user's actual setup. These
+# values are picked so same-line and diagonal-adjacent squares count as
+# "close" while the far side of the pitch does not.
+#
+# MARK_RADIUS is kept close to its original, geometrically-real value -
+# see agents/coach_agent.py's SOLVED_LUCK_RATE for the actual demo-mode
+# generosity (agent_instruction.md follow-up: "design the game to have
+# around 10 to 13 out of 15 be SOLVED with a good score"). A pure radius
+# bump turned out to be too blunt an instrument for that: since the
+# opponent only advances 1-2 pawns per turn, whichever side of the
+# threshold a given formation/matchup starts on tends to stick for the
+# whole match (attacker distance barely changes turn to turn), so radius
+# tuning alone produced all-SOLVED or all-PARTIAL matches depending on
+# formation luck, never the desired mixed spread across the two.
+#
+# HELPER_RADIUS specifically has to clear 40 - a back-three's three DEF
+# slots sit 40 units apart (fewer defenders spread across the same
+# width), so at the old 30 every back-three formation had a defender
+# with literally zero teammates within range on kickoff, before the user
+# ever did anything - guaranteed EXPOSED regardless of play, not a real
+# signal of a bad setup.
+HELPER_RADIUS = 45
+MARK_RADIUS = 24
 
 
 def _dist(a: dict, b: dict) -> float:

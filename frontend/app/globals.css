@@ -26,12 +26,22 @@
 html, body {
   margin: 0;
   padding: 0;
-  background: var(--bg);
   color: var(--text);
   font-family: var(--font-body), system-ui, sans-serif;
   min-height: 100vh;
   overflow-x: hidden;
 }
+
+/* Background lives only on html, not body: .stage (position:fixed,
+   z-index:-1) is a descendant of body, and since body never establishes
+   its own stacking context, body's *own* background paints as an
+   in-flow box AFTER negative-z-index descendants in the root stacking
+   context - a background on body would paint on top of .stage and hide
+   it completely behind solid --bg. html's background paints first
+   (it's the stacking-context root itself), so .stage's gradients/beams/
+   clouds render on top of it as intended. */
+html { background: var(--bg); }
+body { background: transparent; }
 
 /* stadium backdrop: purple/blue glow + light beams + diagonal floor */
 .stage {
@@ -44,25 +54,71 @@ html, body {
     radial-gradient(900px 700px at 50% 118%, rgba(139,47,214,0.28), transparent 60%),
     linear-gradient(178deg, #16142e 0%, #0e0d1d 46%, #0b0a16 100%);
 }
-.beam {
+/* Outer div holds the fixed fan-out position (left/right + base rotation,
+   set inline per-light in page.tsx); the inner .beam does the actual
+   sweeping so the two transforms compose instead of fighting over one
+   "transform" property. Anchored to the top ("ceiling"), shining down -
+   real floodlight rigs sit above a stadium and point down, never the
+   other way around. The cloud layer (.clouds) sits at the bottom
+   ("floor") instead, a separate atmospheric layer from the lights. */
+.beam-wrap {
   position: absolute;
   top: -12%;
   width: 130px;
   height: 75%;
+  transform-origin: top center;
+}
+.beam {
+  position: absolute;
+  inset: 0;
   background: linear-gradient(to bottom, rgba(216,180,255,0.32), rgba(216,180,255,0));
   filter: blur(26px);
   transform-origin: top center;
+  animation-name: beamSweep;
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+}
+@keyframes beamSweep {
+  0%, 100% { transform: rotate(-7deg); opacity: 0.5; }
+  50%      { transform: rotate(7deg);  opacity: 1; }
 }
 .stage .floor {
   position: absolute;
   left: 0; right: 0; bottom: 0;
   height: 26%;
-  background:
-    repeating-linear-gradient(115deg, rgba(122,80,255,0.12) 0 46px, rgba(122,80,255,0) 46px 92px),
-    repeating-linear-gradient(65deg, rgba(70,120,255,0.10) 0 60px, rgba(70,120,255,0) 60px 120px),
-    linear-gradient(to top, rgba(70,50,160,0.35), transparent);
+  /* Plain glow only - the crisscross repeating-linear-gradient stripes
+     this used to have read as an unintentional zig-zag pattern once the
+     cloud layer sits over the same region. */
+  background: linear-gradient(to top, rgba(70,50,160,0.35), transparent);
   mask-image: linear-gradient(to top, black 55%, transparent);
 }
+
+/* Bottom-half cloud cover (floor-level, below the floodlights above),
+   slowly drifting toward and away from center - independent durations
+   per cloud so pairs drift in and out of phase (converging, then
+   diverging) rather than looping in lockstep. */
+.clouds {
+  position: absolute;
+  left: 0; right: 0; bottom: 0;
+  height: 50%;
+  overflow: hidden;
+  pointer-events: none;
+}
+.cloud {
+  position: absolute;
+  border-radius: 50%;
+  background: radial-gradient(closest-side, rgba(226,230,245,0.15), rgba(226,230,245,0) 72%);
+  filter: blur(8px);
+  animation-timing-function: ease-in-out;
+  animation-iteration-count: infinite;
+  animation-direction: alternate;
+}
+.cloud--a { width: 48%; height: 140px; left: -14%; bottom: 4%;  animation-name: driftRight; animation-duration: 26s; }
+.cloud--b { width: 42%; height: 116px; right: -12%; bottom: 15%; animation-name: driftLeft;  animation-duration: 31s; }
+.cloud--c { width: 36%; height: 96px;  left: -10%; bottom: 27%; animation-name: driftRight; animation-duration: 22s; animation-delay: -9s; }
+.cloud--d { width: 32%; height: 84px;  right: -10%; bottom: -2%; animation-name: driftLeft;  animation-duration: 35s; animation-delay: -16s; }
+@keyframes driftRight { from { transform: translateX(0); } to { transform: translateX(20vw); } }
+@keyframes driftLeft  { from { transform: translateX(0); } to { transform: translateX(-20vw); } }
 
 .display {
   font-family: var(--font-display), sans-serif;
@@ -147,6 +203,7 @@ html, body {
 @keyframes armWave { 0%,100%{transform:rotate(0)} 50%{transform:rotate(-38deg)} }
 @keyframes jump { 0%,100%{transform:translateY(0)} 30%{transform:translateY(-12px)} 55%{transform:translateY(0)} 75%{transform:translateY(-5px)} }
 @keyframes sweatDrop { 0%{opacity:0; transform:translateY(-2px)} 30%{opacity:1} 100%{opacity:0; transform:translateY(10px)} }
+@keyframes dashFlow { to { stroke-dashoffset: -8; } }
 
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

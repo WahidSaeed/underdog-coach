@@ -25,11 +25,24 @@ if [ -z "${BEDROCK_MODEL_ID:-}" ]; then
   exit 1
 fi
 
+if [ -z "${DATABASE_URL:-}" ]; then
+  echo "DATABASE_URL is not set in backend/.env"
+  exit 1
+fi
+
+echo "Starting Postgres (docker compose)..."
+(cd "$ROOT_DIR" && docker compose up -d postgres)
+
+echo "Waiting for Postgres to be healthy..."
+until [ "$(docker inspect -f '{{.State.Health.Status}}' underdog-coach-postgres 2>/dev/null)" = "healthy" ]; do
+  sleep 1
+done
+
 if [ ! -d "$BACKEND_DIR/.venv" ]; then
   echo "Creating backend venv..."
   python3 -m venv "$BACKEND_DIR/.venv"
-  "$BACKEND_DIR/.venv/bin/pip" install -q -r "$BACKEND_DIR/requirements.txt"
 fi
+"$BACKEND_DIR/.venv/bin/pip" install -q -r "$BACKEND_DIR/requirements.txt"
 
 if [ ! -d "$FRONTEND_DIR/node_modules" ]; then
   echo "Installing frontend dependencies..."

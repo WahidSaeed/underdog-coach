@@ -6,9 +6,13 @@ football knowledge from the model's own memory. Judges will probe
 "why did the agent make that call" - the answer should always trace
 back to a concrete stat or trait from here, not vibes.
 
-Swap the JSON file read for a DynamoDB table read for the real deployment;
-the function signatures below are what the agents depend on, so the
-storage backend underneath can change without touching agent code.
+get_team() is the one place that decides where player data actually
+comes from: the `players` Postgres table (db/models.PlayerRecord,
+seeded once from data/players.json - see db/seed.py) when DATABASE_URL
+is configured, otherwise the JSON file directly, so it works unmodified
+on the legacy DynamoDB/in-memory deploy path too. Every other function
+below reads through get_team() rather than touching a data source
+directly, so they don't need to know which backend is active.
 """
 
 import json
@@ -31,26 +35,86 @@ with open(DATA_DIR / "traits.json") as f:
     _TRAITS = json.load(f)
 
 
+# Matchday squad size - the first 11 players in each roster (by
+# roster_order in the DB, or array order in the JSON fallback) are the
+# starting XI (used by tools/grid_movement.build_board), the rest are
+# substitutes (agent_instruction.md follow-up: "up to 15 players on the
+# bench" - scoped to 5 here, a standard modern match-day squad of 16).
+STARTING_XI_SIZE = 11
+
+
+def _load_team_from_db(team_id: str) -> dict:
+    from db.models import PlayerRecord
+    from db.session import get_session
+
+    with get_session() as db:
+        rows = (
+            db.query(PlayerRecord)
+            .filter_by(team_id=team_id)
+            .order_by(PlayerRecord.roster_order)
+            .all()
+        )
+    players = [{
+        "id": r.id, "num": r.num, "name": r.name, "position": r.position,
+        "stats": r.stats, "strengths": r.strengths, "weaknesses": r.weaknesses,
+        "photo_url": r.photo_url,
+    } for r in rows]
+    # Team name/color are small, static metadata, not the per-player data
+    # this table is about - still sourced from the JSON file even in DB
+    # mode, same as before.
+    meta = _PLAYER_DB[team_id]
+    return {"name": meta["name"], "color": meta["color"], "players": players}
+
+
 def get_team(team_id: str) -> dict:
     """Return full roster + metadata for 'blue' or 'red'."""
+    from db.session import database_configured
+    if database_configured():
+        return _load_team_from_db(team_id)
     return _PLAYER_DB[team_id]
+
+
+def get_bench(team_id: str) -> list[dict]:
+    """Return the team's substitutes - every roster player past the
+    starting XI, regardless of current match state (which of them are
+    still available to bring on is tracked per-match, see
+    db/models.py Match.bench_player_ids/subbed_off_ids)."""
+    return get_team(team_id)["players"][STARTING_XI_SIZE:]
+
+
+def get_starting_xi(team_id: str) -> list[dict]:
+    """The 11 players tools/grid_movement.build_board is allowed to place
+    on the grid. Callers must use this (not get_team(...)["players"]) when
+    building a board - passing the full roster lets build_board's
+    position-label fallback genuinely match a bench player instead of a
+    starter whenever a formation wants more of some position than the
+    starting XI has (e.g. 433 wants 3 CMs, the starting XI only has 2)."""
+    return get_team(team_id)["players"][:STARTING_XI_SIZE]
 
 
 def get_player(team_id: str, player_id: str) -> Optional[dict]:
     """Return a single player's stat block and traits."""
-    for p in _PLAYER_DB[team_id]["players"]:
+    for p in get_team(team_id)["players"]:
         if p["id"] == player_id:
             return p
     return None
 
+
 def get_players_by_position(team_id: str, position: str) -> list[dict]:
     """e.g. get_players_by_position('red', 'RB') -> list of matches."""
-    return [p for p in _PLAYER_DB[team_id]["players"] if p["position"] == position]
+    return [p for p in get_team(team_id)["players"] if p["position"] == position]
 
 
 def trait_definition(trait: str) -> Optional[str]:
     """Look up the plain-language meaning of a trait tag."""
     return _TRAITS["strengths"].get(trait) or _TRAITS["weaknesses"].get(trait)
+
+
+def list_traits() -> dict:
+    """{"strengths": {tag: definition}, "weaknesses": {tag: definition}} -
+    the full valid tag set, for the player management UI's dropdowns
+    (GET /traits) rather than hardcoding the list in the frontend too."""
+    return _TRAITS
 
 
 def find_exploitable_matchups(attacking_team: str, defending_team: str) -> list[dict]:
@@ -63,13 +127,19 @@ def find_exploitable_matchups(attacking_team: str, defending_team: str) -> list[
     rotate through real matchups across repeated calls - see
     match_director_agent.pick_target_matchup, which uses this so
     consecutive drills don't all spotlight the identical defender.
+
+    Restricted to the starting XI (not get_team's full 16-player roster,
+    bench included): a drill's focus matchup has to name someone actually
+    on the pitch at kickoff, or board_metrics.threat_cover can never find
+    the "defender" on the board at all and reports worst-case isolated
+    forever - permanently EXPOSED regardless of how well the user plays.
     """
     attackers = [
-        p for p in _PLAYER_DB[attacking_team]["players"]
+        p for p in get_starting_xi(attacking_team)
         if p["position"] in ("LM", "RM", "ST")
     ]
     defenders = [
-        p for p in _PLAYER_DB[defending_team]["players"]
+        p for p in get_starting_xi(defending_team)
         if p["position"] in ("LB", "RB", "CB")
     ]
 

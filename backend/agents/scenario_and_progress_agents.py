@@ -81,15 +81,37 @@ class ProgressAgent:
             "matchup": exploited_matchup,
         })
 
-    def recurring_weakness(self) -> dict | None:
-        """Returns the matchup that has been exploited more than once, if any."""
+    def recurring_weakness(self, window: int = 6, threshold: int = 3) -> dict | None:
+        """
+        Returns the matchup that's been exploited `threshold`+ times
+        *recently* (the last `window` rounds), if any.
+
+        Windowed on purpose: this used to scan the entire session history,
+        so the moment any defender was hit twice - easy given
+        find_exploitable_matchups has one dominant highest-scoring pair
+        (see tools/player_data.py) - it locked every later drill in the
+        session onto that one matchup forever, since session_id persists
+        across "NEW MATCH" clicks and history only ever grows. A window
+        means an old pattern the user has since moved past ages out
+        instead of haunting every future match.
+
+        threshold=3, not 2: the exploitable-matchup pool only has 3
+        distinct defenders total, so decide_counter_strategy's own
+        rotation (recent_round_defenders) already guarantees each one
+        appears ~twice in any 6-round window under normal, working
+        rotation - a threshold of 2 fired on essentially every round
+        regardless of whether the user was actually struggling with one
+        specific defender. 3 only fires when rotation itself has broken
+        down (or the user keeps returning to the same real weakness
+        despite the AI trying to vary it) - an actual signal again.
+        """
         seen = {}
-        for round_data in self.history:
+        for round_data in self.history[-window:]:
             key = round_data["matchup"].get("defender_id")
             if not key:
                 continue
             seen[key] = seen.get(key, 0) + 1
-            if seen[key] >= 2:
+            if seen[key] >= threshold:
                 return round_data["matchup"]
         return None
 
@@ -162,10 +184,17 @@ class DynamoProgressAgent(ProgressAgent):
 
 def get_progress_agent(session_id: str):
     """
-    Factory used by main.py. Returns a DynamoDB-backed agent when
-    SESSION_TABLE is set (the Lambda deployment sets this via
-    template.yaml), otherwise an in-memory one for local dev.
+    Factory used by main.py. Checked in this order:
+    1. DATABASE_URL set (local Docker Postgres dev, see docker-compose.yml)
+       -> PostgresProgressStore, same interface, backed by the
+       `session_rounds` table (db/repository.py).
+    2. SESSION_TABLE set (the Lambda deployment sets this via
+       template.yaml) -> DynamoDB-backed agent.
+    3. otherwise -> in-memory, for local dev without Postgres configured.
     """
+    if os.environ.get("DATABASE_URL"):
+        from db.repository import PostgresProgressStore
+        return PostgresProgressStore(session_id)
     table_name = os.environ.get("SESSION_TABLE")
     if table_name:
         return DynamoProgressAgent(session_id, table_name)

@@ -27,7 +27,6 @@ from strands import Agent, tool
 
 from agents import scenario_client
 from agents.model_config import build_model, tool_call_names
-from agents.opponent_manager_agent import DEFAULT_FORMATION, VALID_FORMATIONS
 from tools import player_data
 
 DEFAULT_DIFFICULTY = "medium"
@@ -45,8 +44,8 @@ writing to the scenario tool, passing the matchup you chose as the focus.
 Ground everything in real player data; never invent an attribute that
 isn't in the data.
 
-The numeric fields (score, minute) and formation are the source of truth -
-the scenario text must agree with them. user_posture must be consistent
+The numeric fields (score, minute) are the source of truth - the scenario
+text must agree with them. user_posture must be consistent
 with the score, minute and scenario text (behind late -> usually chasing;
 ahead late -> protecting_lead or pinned_back). Vary the score, minute and
 posture across drills rather than defaulting to the same stoppage-time,
@@ -60,13 +59,19 @@ and focus_note must each be one sentence; scenario must be 2-3 sentences.
 
 
 class DrillBrief(BaseModel):
+    """
+    No formation field here on purpose: opening formations are picked
+    randomly from tools/strategy_catalog.py at /match/start
+    (agent_instruction.md item 3 - "picks randomly", not "the LLM
+    decides"), and mid-match formations are fixed for the whole match
+    (tools/grid_movement.py) - the Director only ever supplies scenario
+    prose now.
+    """
+
     scenario: str = Field(description="2-3 sentence live-game situation (score, time, momentum).")
     coaching_goal: str = Field(description="One sentence: what the user should try to achieve.")
     focus_note: str = Field(
         description="One sentence: why this drill, referencing the matchup or recurring mistake."
-    )
-    opponent_formation_code: str = Field(
-        description="Opponent shape for this situation. One of: 442, 433, 352, 532."
     )
     user_goals: int = Field(description="User team's current goals in the scenario, 0-9.")
     opponent_goals: int = Field(description="Opponent's current goals, 0-9.")
@@ -173,8 +178,6 @@ def heuristic_fallback(user_team_id: str, opponent_team_id: str, target_matchup:
         "coaching_goal": coaching_goal,
         "focus_note": focus_note,
         "focus_matchup": target_matchup,
-        # "chasing the game" is the most motivating default for a drill.
-        "opponent_formation_code": DEFAULT_FORMATION,
         "user_goals": 0,
         "opponent_goals": 1,
         "minute": 78,
@@ -239,7 +242,6 @@ def design_drill(session, user_team_id: str, opponent_team_id: str, difficulty: 
         ]
 
     if brief is not None:
-        formation = brief.opponent_formation_code if brief.opponent_formation_code in VALID_FORMATIONS else DEFAULT_FORMATION
         user_goals = max(0, min(9, brief.user_goals))
         opponent_goals = max(0, min(9, brief.opponent_goals))
         posture = brief.user_posture if brief.user_posture in VALID_POSTURES else _derive_posture(user_goals, opponent_goals)
@@ -250,7 +252,6 @@ def design_drill(session, user_team_id: str, opponent_team_id: str, difficulty: 
             "focus_matchup": target_matchup,
             # Never trust the model's arithmetic - clamp to the ranges the
             # UI can render.
-            "opponent_formation_code": formation,
             "user_goals": user_goals,
             "opponent_goals": opponent_goals,
             "minute": max(1, min(90, brief.minute)),

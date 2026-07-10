@@ -66,6 +66,11 @@ export const TEAMS: Record<TeamId, { name: string; short: string; players: Playe
       { id: "b9", num: 11, name: "K. Solberg", position: "LM", stats: { pace: 82, shooting: 68, passing: 66, defending: 38, physicality: 58, composure: 60 }, strengths: ["electric_pace", "long_range_shooter"], weaknesses: ["wilts_under_high_press"] },
       { id: "b10", num: 9, name: "A. Vidal", position: "ST", stats: { pace: 74, shooting: 86, passing: 60, defending: 22, physicality: 71, composure: 80 }, strengths: ["clinical_finisher", "composed_finisher"], weaknesses: ["injury_prone"] },
       { id: "b11", num: 10, name: "E. Whitfield", position: "ST", stats: { pace: 79, shooting: 78, passing: 65, defending: 24, physicality: 60, composure: 63 }, strengths: ["clinical_finisher"], weaknesses: ["indecisive_in_box"] },
+      { id: "b12", num: 12, name: "N. Prescott", position: "GK", stats: { pace: 40, shooting: 15, passing: 60, defending: 70, physicality: 68, composure: 60 }, strengths: ["quick_release_gk"], weaknesses: ["poor_positioning"] },
+      { id: "b13", num: 13, name: "O. Danso", position: "CB", stats: { pace: 58, shooting: 18, passing: 60, defending: 78, physicality: 80, composure: 72 }, strengths: ["tackling_specialist"], weaknesses: ["slow_turning"] },
+      { id: "b14", num: 14, name: "H. Sorensen", position: "LB", stats: { pace: 73, shooting: 30, passing: 66, defending: 69, physicality: 64, composure: 60 }, strengths: ["overlap_specialist"], weaknesses: ["poor_tracking_back"] },
+      { id: "b15", num: 15, name: "C. Reyes", position: "CM", stats: { pace: 68, shooting: 52, passing: 77, defending: 60, physicality: 65, composure: 70 }, strengths: ["press_resistant"], weaknesses: ["static_in_transition"] },
+      { id: "b16", num: 16, name: "D. Osei", position: "ST", stats: { pace: 81, shooting: 75, passing: 58, defending: 20, physicality: 66, composure: 58 }, strengths: ["electric_pace"], weaknesses: ["indecisive_in_box"] },
     ],
   },
   red: {
@@ -83,6 +88,11 @@ export const TEAMS: Record<TeamId, { name: string; short: string; players: Playe
       { id: "r9", num: 11, name: "S. Adeyemi", position: "LM", stats: { pace: 80, shooting: 66, passing: 68, defending: 36, physicality: 61, composure: 58 }, strengths: ["electric_pace"], weaknesses: ["wilts_under_high_press", "weak_foot_only"] },
       { id: "r10", num: 9, name: "V. Petrov", position: "ST", stats: { pace: 70, shooting: 84, passing: 58, defending: 20, physicality: 78, composure: 76 }, strengths: ["aerial_threat", "clinical_finisher"], weaknesses: ["injury_prone"] },
       { id: "r11", num: 10, name: "L. Ferreira", position: "ST", stats: { pace: 77, shooting: 80, passing: 63, defending: 22, physicality: 58, composure: 59 }, strengths: ["composed_finisher"], weaknesses: ["indecisive_in_box", "short_fuse"] },
+      { id: "r12", num: 12, name: "M. Kowalczyk", position: "GK", stats: { pace: 40, shooting: 15, passing: 58, defending: 72, physicality: 70, composure: 65 }, strengths: ["quick_release_gk"], weaknesses: ["poor_distribution"] },
+      { id: "r13", num: 13, name: "A. Diallo", position: "CB", stats: { pace: 56, shooting: 18, passing: 56, defending: 80, physicality: 83, composure: 70 }, strengths: ["aerial_threat"], weaknesses: ["rash_tackler"] },
+      { id: "r14", num: 14, name: "P. Nowak", position: "LB", stats: { pace: 75, shooting: 28, passing: 62, defending: 68, physicality: 63, composure: 58 }, strengths: ["overlap_specialist"], weaknesses: ["weak_in_the_air"] },
+      { id: "r15", num: 15, name: "T. Vukovic", position: "CM", stats: { pace: 64, shooting: 48, passing: 74, defending: 66, physicality: 71, composure: 68 }, strengths: ["box_to_box_engine"], weaknesses: ["poor_positioning"] },
+      { id: "r16", num: 16, name: "K. Amaro", position: "ST", stats: { pace: 78, shooting: 79, passing: 55, defending: 18, physicality: 60, composure: 55 }, strengths: ["composed_finisher"], weaknesses: ["injury_prone"] },
     ],
   },
 };

@@ -23,9 +23,10 @@ from pydantic import BaseModel, Field
 from strands import Agent, tool
 
 from agents.model_config import build_model, tool_call_names
-from tools import player_data
+from tools import grid_movement, player_data
 
-VALID_FORMATIONS = {"442", "433", "352", "532"}
+# Single source of truth for which formation codes exist - tools/grid_movement.LINES.
+VALID_FORMATIONS = set(grid_movement.LINES.keys())
 DEFAULT_FORMATION = "433"
 
 SYSTEM_PROMPT = """
@@ -58,7 +59,11 @@ def get_roster(team_id: str) -> dict:
 
 class OpponentPlan(BaseModel):
     formation_code: str = Field(
-        description="The counter-formation you're committing to. Must be one of: 442, 433, 352, 532."
+        description=(
+            "The counter-formation you're committing to, narrative only - not the grid this "
+            "turn's moves are computed on (see decide_counter_strategy's docstring). Must be "
+            "one of: 442, 433, 352, 532, 41212, 4231, 4321, 4222, 3421, 3241, 460."
+        )
     )
     instruction: str = Field(description="One sentence tactical instruction, in your voice as manager.")
     narrative: str = Field(description="The full committed plan, 2-3 sentences, for the team feed.")
@@ -99,6 +104,7 @@ def heuristic_fallback(user_formation: dict, target_matchup: dict) -> dict:
         "target_matchup": target_matchup,
         "tool_calls": [],
         "structured_ok": False,
+        "moves": [],
     }
 
 
@@ -109,6 +115,9 @@ def decide_counter_strategy(
     drill: dict | None = None,
     metrics: dict | None = None,
     session=None,
+    grid_formation_code: str | None = None,
+    red_pawns: list[dict] | None = None,
+    blue_pawns: list[dict] | None = None,
 ) -> dict:
     """
     Orchestration entry point called by the backend API.
@@ -122,10 +131,26 @@ def decide_counter_strategy(
     session: optional ProgressAgent/DynamoProgressAgent - used to exclude the
         immediately-preceding round's defender from this round's pick so
         consecutive asks rotate instead of confirming the same one forever.
+    grid_formation_code / red_pawns / blue_pawns: when all three are given
+        (the new turn-based /opponent flow), the *exact* pawn destinations
+        for this turn are computed by grid_movement.plan_opponent_moves
+        against the match's fixed formation grid - never against the
+        LLM's own `formation_code` field below, which stays a narrative
+        "we're committing to a back five" flourish (item 1's "opponent
+        tactics" story), not the grid this turn's legal moves are computed
+        on. Keeps pawn placement legal-by-construction regardless of what
+        the model narrates. Omit all three (legacy /opponent callers) to
+        get moves=[] back.
     Returns: { formation_code, instruction, narrative, raw_response,
-               target_matchup, tool_calls, structured_ok }
+               target_matchup, tool_calls, structured_ok, moves }
     """
-    exclude = session.recent_round_defenders(n=1) if session else set()
+    # n=2 not 1: find_exploitable_matchups' scored pool typically has very
+    # few distinct defenders (one dominant highest-scoring pair plus a
+    # couple of runners-up - see tools/player_data.py), so excluding only
+    # the immediately preceding round still let the same strongest pair
+    # swing right back in every other round. Widening the window forces a
+    # real rotation through the remaining candidates instead.
+    exclude = session.recent_round_defenders(n=2) if session else set()
     target_matchup = player_data.pick_rotating_matchup(opponent_team_id, user_team_id, exclude_defender_ids=exclude)
     agent = build_agent()
 
@@ -150,7 +175,7 @@ def decide_counter_strategy(
     {scouting_report}
 
     Use the roster tool to confirm any player details you reference, then
-    commit to ONE counter-formation (must be one of 442, 433, 352, 532),
+    commit to ONE counter-formation (must be one of {", ".join(sorted(VALID_FORMATIONS))}),
     ONE tactical instruction, and a short narrative explaining the plan.
     """
 
@@ -168,6 +193,10 @@ def decide_counter_strategy(
     # feed only shows real scouting actions, not the output-shaping step.
     tool_calls = [name for name in tool_call_names(result) if name != OpponentPlan.__name__]
 
+    moves: list[dict] = []
+    if grid_formation_code and red_pawns is not None and blue_pawns is not None:
+        moves = grid_movement.plan_opponent_moves(grid_formation_code, red_pawns, target_matchup, blue_pawns)
+
     if plan is not None and plan.formation_code in VALID_FORMATIONS:
         return {
             "formation_code": plan.formation_code,
@@ -177,6 +206,7 @@ def decide_counter_strategy(
             "target_matchup": target_matchup,
             "tool_calls": tool_calls,
             "structured_ok": True,
+            "moves": moves,
         }
 
     # Structured output missing, or the model picked a formation the UI
@@ -185,4 +215,5 @@ def decide_counter_strategy(
     fallback["narrative"] = str(result) or fallback["narrative"]
     fallback["raw_response"] = str(result)
     fallback["tool_calls"] = tool_calls
+    fallback["moves"] = moves
     return fallback
