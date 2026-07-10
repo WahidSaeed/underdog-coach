@@ -150,14 +150,40 @@ and `board_metrics.py` + `coach_agent._derive_verdict` decide the verdict
 before the LLM ever sees it. The model explains; it never grades or
 places its own pieces.
 
-**Multi-agent, not single-prompt.**
+**Multi-agent, not single-prompt.** Four agents actually call Bedrock (all
+Strands `Agent`s on the same shared model via `agents/model_config.py`);
+a fifth, Progress, is session-memory bookkeeping only — no LLM call.
 
-| Agent | Job | Grounded in |
+| Agent | Job | Tools | Grounded in |
+|---|---|---|---|
+| Opponent Manager | Commits to a counter-formation/instruction and targets a real matchup | `scout_matchup`, `get_roster` | `player_data.pick_rotating_matchup` — pace gaps, tracking-back weaknesses, aerial mismatches |
+| Coach | Explains the turn's verdict in plain language, names the players involved | `get_player_traits`, `explain_trait` | `board_metrics.threat_cover` + `rules_engine` findings for the match's fixed focus matchup |
+| Match Director | Designs the scenario/coaching goal a match is built around | `scout_matchup`, `generate_scenario` (delegates to the Scenario agent) | both rosters, a scouted matchup |
+| Scenario | Writes the 2-sentence live-game situation text | `get_roster` | the matchup the Director hands it as the teaching focus |
+| Progress *(not LLM-backed)* | Session memory — flags a recurring weakness across rounds | — | windowed matchup log (Postgres/DynamoDB) |
+
+The Match Director calling the Scenario agent through `generate_scenario`
+is a genuine agent-to-agent call (not backend code chaining two fixed
+requests) — the one "agents-as-tools" pattern in the codebase. The
+Scenario agent can also run remotely on Bedrock AgentCore Runtime instead
+of in-process once `SCENARIO_AGENT_RUNTIME_ARN` is set.
+
+**How much LLM is actually used, per match:**
+
+| Call | LLM calls | Frequency |
 |---|---|---|
-| Opponent Manager | Commits to a counter-formation/instruction and targets a real matchup | `player_data.pick_rotating_matchup` — pace gaps, tracking-back weaknesses, aerial mismatches |
-| Coach | Explains the turn's verdict in plain language, names the players involved | `board_metrics.threat_cover` + `rules_engine` findings for the match's fixed focus matchup |
-| Match Director | Designs the scenario/coaching goal a match is built around | both rosters, a scouted matchup |
-| Progress | Session memory — flags a recurring weakness across rounds | windowed matchup log (Postgres/DynamoDB) |
+| `POST /match/start` | 1 (Director) + up to 1 nested (Scenario, if delegated) | once per match |
+| `POST /turn` | 0 — always deterministic (grid movement + rules engine) | every turn |
+| `POST /opponent` | 1 (Opponent Manager) | every turn |
+| `POST /coach-feedback` | 1 (Coach) | every turn |
+
+A full 15-turn match is roughly **~31-32 Bedrock invocations** (1-2 at
+kickoff, then 2 per turn). Every one of those is wrapped in one retry on
+failure (`_call_with_one_retry` in `main.py`) with a deterministic
+`heuristic_fallback` if Bedrock is unreachable twice — the LLM is only
+ever used for narration and explanation, never for move legality,
+matchup selection, or verdict grading, all of which are 100% code (see
+"Ground truth computed in code" above).
 
 ## Backend: connecting to Bedrock
 
