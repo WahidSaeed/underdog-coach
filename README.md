@@ -1,69 +1,136 @@
 # Underdog Coach
 
-An AI tactics trainer for grassroots football: set your formation, and a
-multi-agent AI opponent reacts by targeting real weaknesses on your roster,
-then a coach agent explains why — by name, by trait — instead of giving
-generic advice.
+A chess-like football tactics trainer: your formation and the AI
+opponent's counter both live on a fixed, deterministic slot grid — never
+free-hand pixels — and every turn is graded by a real rules engine
+(offside, marking, defensive-line shape, pressing traps), not by an LLM
+judging its own homework. A coach agent explains *why* a turn graded the
+way it did, by player name and by trait, grounded in the same facts the
+scoring used.
+
+## Quick start (local Postgres, recommended)
+
+```bash
+cp backend/.env.example backend/.env   # fill in BEDROCK_MODEL_ID / AWS_PROFILE / AWS_REGION
+./dev.sh
+```
+
+`dev.sh` starts Postgres (`docker compose up -d postgres`), waits for it
+to be healthy, installs both dependencies if missing, and runs the
+backend (`http://localhost:8000`) and frontend (`http://localhost:3000`)
+together. Requires Docker (for Postgres) and Bedrock access — see
+"Backend: connecting to Bedrock" below for that half.
+
+The login screen is a fake gate (a `localStorage` flag, no real backend
+auth) — click through it to reach the app.
+
+## How a match works
+
+A **match** is one bounded, goal-based playthrough: both teams' opening
+formation and tactical stance are drawn randomly from a fixed catalog
+(`backend/tools/strategy_catalog.py`), a scenario/coaching goal is
+generated around a real exploitable matchup, and the match ends when the
+score crosses a target or `max_turns` (15) runs out.
+
+Each turn is one of three mutually-exclusive actions:
+
+- **Swap** — drag one pawn onto an adjacent teammate (a "king move" on
+  the formation's fixed grid — `backend/tools/grid_movement.py`). A
+  starting XI fills every slot, so every ordinary move is a mutual swap,
+  never a move into empty space.
+- **Formation change** — reshape the whole team onto a different
+  preset (11 formations supported). Rare and costly: gated by a 5-turn
+  cooldown and a small score penalty.
+- **Substitution** — bring on a bench player for an on-field one, same
+  spot. Capped at 5 per match (FIFA's modern substitution limit), no
+  score penalty, but a bench player subbed off can never return.
+
+The turn loop is three calls, split for latency (each can involve
+several Bedrock tool-call round-trips): `POST /turn` (fast, no LLM —
+resolves the move deterministically), `POST /opponent` (the AI manager
+commits a counter-plan and its pawns move), `POST /coach-feedback`
+(grades the turn and explains it).
+
+**Grading is deterministic, not LLM-judged.** `board_metrics.threat_cover`
+computes whether the drill's focus attacker is marked and whether the
+defender has cover; `coach_agent._derive_verdict` turns that into
+SOLVED / PARTIAL / EXPOSED in code, and the LLM is only ever asked to
+*explain* the grade it's given, never to pick one. This was deliberately
+tuned (`SOLVED_RATE`, `MARK_RADIUS`/`HELPER_RADIUS` in
+`board_metrics.py`) so a full 15-turn match lands **~10-13 turns SOLVED**
+with a strong final score — an explicit, acknowledged demo bias, not an
+accuracy claim.
 
 ## Try the frontend
 
 The UI is a Next.js app with a FIFA-23-inspired theme: volt green on deep
-navy, diagonal-cut panels, condensed display type, and an animated coach
-avatar that reacts emotionally to your tactics — waving as he explains,
-sweating when he spots a problem, fuming when a channel is wide open, and
-jumping when your shape holds up.
+navy, diagonal-cut panels, condensed display type, a stadium backdrop
+(sweeping floodlights up top, drifting cloud cover along the floor), and
+an animated coach avatar that reacts emotionally to the verdict.
 
 ```bash
 cd frontend
 npm install
 npm run dev        # http://localhost:3000
-npm run build      # static export to frontend/out/ (deployable to S3/CloudFront)
+npm run build      # static export to frontend/out/
 ```
 
-- Drag pawns to set your shape; formations animate between presets
-- Click a pawn for a FIFA-style player card — big overall rating,
-  color-coded stat bars, strength/weakness chips
-- Hit "Ask the coach" — the opponent reshapes, the targeted matchup pawns
-  pulse on the pitch, the coach's face and body language change with the
-  verdict, and the feed explains it player-by-player
-
-"Ask the coach" calls the real backend (`POST /opponent` then
-`POST /coach-feedback`) — see "Backend: connecting to Bedrock" below to
-run that locally. If the API is unreachable or times out, the UI falls
-back to a client-side heuristic (`lib/engine.ts`, mirrors
-`backend/tools/player_data.py`) so the demo never hard-fails on stage;
-fallback messages are prefixed `⚠ OFFLINE READ —` so it's never mistaken
-for a real agent response. The original static HTML prototype is kept at
-`docs/legacy_tactics_board.html`.
+- Drag a pawn onto a teammate to propose a swap, or use the SYSTEM CHANGE
+  / bench rows to stage a formation change or substitution — nothing
+  commits until END TURN
+- Click a pawn for a FIFA-style player card — overall rating, color-coded
+  stat bars, strength/weakness chips, and (once seeded) a real photo
+- Live arrows show the opponent's pawn movement and the live threat
+  matchup; the Scoreboard tracks good/bad/neutral findings and progress
+  toward the target score
+- A modal pops up automatically when the match ends, with the final
+  score and a SOLVED/PARTIAL/EXPOSED tally for the whole match
+- **ROSTER MANAGER** (top-right link) — add, edit, or delete players on
+  either team: shirt number, name, position, the 6-stat block, and
+  strength/weakness tags picked from the shared glossary. New players get
+  a random headshot from the 32-photo pool and start on the bench.
 
 ## Project structure
 
 ```
 underdog-coach/
-├── template.yaml                AWS SAM template: Lambda + API Gateway + DynamoDB + Bedrock IAM
-├── samconfig.toml.example         template for `sam deploy` parameters — copy to samconfig.toml (gitignored)
-├── Makefile                      build/deploy/local/destroy commands
-├── frontend/                     Next.js app (FIFA-23-style UI, static export)
-│   ├── app/                      layout, page, global theme + animations
-│   ├── components/               Pitch, PlayerCard, CoachAvatar (animated emotions)
-│   ├── lib/
-│   │   ├── api.ts                 client for POST /opponent + POST /coach-feedback
-│   │   ├── data.ts                roster data
-│   │   └── engine.ts              client-side matchup engine (offline fallback)
-│   └── .env.example               NEXT_PUBLIC_API_URL - copy to .env.local
+├── docker-compose.yml             local-dev Postgres (agent_instruction.md's persistence layer)
+├── dev.sh                          starts Postgres + backend + frontend together
+├── template.yaml                   AWS SAM template (legacy free-play deploy path - see "Deploying to AWS")
+├── frontend/
+│   ├── app/
+│   │   ├── page.tsx                 match orchestration: turn loop, staged actions, feed
+│   │   ├── roster/page.tsx          player management (add/edit/delete, both teams)
+│   │   ├── layout.tsx               wraps the app in AuthGate
+│   │   └── globals.css              theme, stadium backdrop, animations
+│   ├── components/
+│   │   ├── Pitch.tsx                 grid-snapped drag/swap, arrows, cross-team overlap resolution
+│   │   ├── AuthGate.tsx / LoginScreen.tsx  fake login gate
+│   │   └── coach/                    Scoreboard, Bench, MatchEndModal, VerdictHero, MatchReportDrawer, ...
+│   └── lib/
+│       ├── api.ts                    client for every backend endpoint
+│       ├── engine.ts                 pure helpers: pawn mapping, chemistry/threat arrows
+│       ├── auth.ts                   fake login/logout (localStorage flag)
+│       └── data.ts                   client-side roster mirror (fallback/UI display only)
 ├── backend/
-│   ├── main.py                   FastAPI app + Mangum handler (Lambda entry point)
-│   ├── requirements.txt          installed automatically by `sam build`
+│   ├── main.py                       FastAPI app - /match/start, /turn, /opponent, /coach-feedback, /roster, /players, /traits
+│   ├── db/                           SQLAlchemy models + repositories (matches, turns, players, session_rounds)
 │   ├── agents/
-│   │   ├── model_config.py                 shared BedrockModel construction (reads BEDROCK_MODEL_ID)
-│   │   ├── opponent_manager_agent.py       plans a counter-formation, targets real weaknesses
-│   │   ├── coach_agent.py                  explains the "why" by name and trait
-│   │   └── scenario_and_progress_agents.py scenario generation + DynamoDB session memory
+│   │   ├── opponent_manager_agent.py   commits a counter-formation/instruction, targets a real matchup
+│   │   ├── coach_agent.py              explains the (deterministically-decided) verdict
+│   │   ├── match_director_agent.py     designs the scenario/coaching-goal for a new match
+│   │   └── scenario_and_progress_agents.py  session memory (Postgres / DynamoDB / in-memory)
 │   └── tools/
-│       └── player_data.py        grounding layer every agent calls into
+│       ├── grid_movement.py          fixed slot grid, legal moves, formation/substitution logic
+│       ├── rules_engine.py           offside, marking, defensive-line, pressing-trap findings
+│       ├── scoring.py                 finding/verdict point values, match-end conditions
+│       ├── strategy_catalog.py       fixed catalog of opening formation x tactical-stance combos
+│       ├── coaching_advice.py        deterministic best-swap suggestion
+│       ├── board_metrics.py          threat_cover: is the focus attacker marked, is the defender isolated
+│       └── player_data.py            grounding layer every agent calls into (DB-backed once configured)
 ├── data/
-│   ├── players.json              both rosters: 6-stat block + strength/weakness tags
-│   └── traits.json               glossary of every trait tag and its plain meaning
+│   ├── players.json                  both rosters: 6-stat block + strength/weakness tags (seed data)
+│   └── traits.json                   glossary of every trait tag and its plain meaning
 └── README.md
 ```
 
@@ -74,29 +141,29 @@ player has a FIFA-style stat block (pace, shooting, passing, defending,
 physicality, composure) plus tagged strengths and weaknesses drawn from a
 shared glossary (`data/traits.json`). Agents never invent an attribute —
 they call `player_data.py` as a tool, so every piece of advice traces back
-to a concrete fact instead of generic football platitudes. This is the
-detail judges will probe ("why this and not that") and it's answered by
-pointing at the data layer.
+to a concrete fact instead of generic football platitudes.
 
-**Multi-agent, not single-prompt.** A single LLM call could produce
-plausible-sounding tactics advice, but it couldn't do what this needs:
+**Ground truth computed in code, handed to the LLM — never the other way
+around.** This shows up twice: `grid_movement.py` decides every pawn's
+exact destination (the opponent's own agent only narrates the "why"),
+and `board_metrics.py` + `coach_agent._derive_verdict` decide the verdict
+before the LLM ever sees it. The model explains; it never grades or
+places its own pieces.
+
+**Multi-agent, not single-prompt.**
 
 | Agent | Job | Grounded in |
 |---|---|---|
-| Opponent Manager | Commits to a counter-formation and picks a real matchup to exploit | `find_exploitable_matchup()` — pace gaps, tracking-back weaknesses, aerial mismatches |
-| Coach | Explains the exploit in plain language, names the players involved | opponent's committed plan + the specific matchup |
-| Scenario | Generates a live-game situation built around a real matchup | both rosters |
-| Progress | Session memory — flags if the user keeps repeating the same personnel mistake | round-by-round matchup log |
-
-This is planning, tool use, and state/memory in one loop — the things a
-single prompt can't reliably do, and exactly what the judging criteria
-calls out under "real agentic behavior."
+| Opponent Manager | Commits to a counter-formation/instruction and targets a real matchup | `player_data.pick_rotating_matchup` — pace gaps, tracking-back weaknesses, aerial mismatches |
+| Coach | Explains the turn's verdict in plain language, names the players involved | `board_metrics.threat_cover` + `rules_engine` findings for the match's fixed focus matchup |
+| Match Director | Designs the scenario/coaching goal a match is built around | both rosters, a scouted matchup |
+| Progress | Session memory — flags a recurring weakness across rounds | windowed matchup log (Postgres/DynamoDB) |
 
 ## Backend: connecting to Bedrock
 
 The agents (`backend/agents/*.py`) are Strands `Agent`s backed by
 `BedrockModel` — verified end-to-end against real Bedrock (eu-central-1,
-Claude Haiku). To run the backend locally against your own AWS account:
+Claude Haiku).
 
 **1. AWS credentials.** Create an IAM user with an access key (IAM console
 → Users → your user → Security credentials → Create access key → "CLI"
@@ -111,68 +178,61 @@ aws configure --profile underdog-coach   # region: eu-central-1
 
 The IAM user needs permissions to call `bedrock:InvokeModel*` at minimum;
 `AdministratorAccess` is the pragmatic choice for a throwaway hackathon
-account since deploying (below) also needs to create Lambda/API
+account since deploying also needs to create Lambda/API
 Gateway/DynamoDB/IAM resources.
 
-**2. Enable a Bedrock model.** AWS retired the old manual "Model access"
-opt-in page — models now auto-enable on first invocation. In the Bedrock
-console, region **eu-central-1**: Model catalog → pick an Anthropic Claude
-model → open the Playground → send a test message. First-time Anthropic
-usage on an account may prompt a short "use case details" form before it
-lets the message through. Not every model tier is available to every
-account (e.g. you may get `AccessDeniedException` on a Sonnet model but
-not Haiku) — Haiku is a fine default for both agents.
+**2. Enable a Bedrock model.** Models auto-enable on first invocation. In
+the Bedrock console, region **eu-central-1**: Model catalog → pick an
+Anthropic Claude model → open the Playground → send a test message.
+First-time Anthropic usage on an account may prompt a short "use case
+details" form before it lets the message through. Not every model tier
+is available to every account (e.g. you may get `AccessDeniedException`
+on a Sonnet model but not Haiku) — Haiku is a fine default.
 
 **3. Get the exact model id.** Use the **EU cross-region inference
 profile id** (`eu.anthropic.claude-...`), not a bare model id — bare ids
 are frequently not invokable from eu-central-1. Easiest way to get it
 exactly right: in the Playground, after a successful test message, use
-the "View code" / "Export code" button to see the literal id the working
-call used, and copy it from there.
+the "View code" / "Export code" button and copy the literal id it used.
 
-**4. Run the backend:**
+**4. `backend/.env`:**
+
+```
+BEDROCK_MODEL_ID=eu.anthropic.claude-...
+AWS_PROFILE=underdog-coach
+AWS_REGION=eu-central-1
+DATABASE_URL=postgresql+psycopg://underdog:underdog_dev_pw@localhost:5432/underdog_coach
+```
+
+`./dev.sh` reads this file, starts Postgres, and runs both halves. To run
+the backend by itself instead:
 
 ```bash
 cd backend
 python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
-BEDROCK_MODEL_ID=<your eu.anthropic.claude-...-id> \
-AWS_PROFILE=underdog-coach \
-AWS_REGION=eu-central-1 \
+docker compose up -d postgres   # from repo root
+BEDROCK_MODEL_ID=<your eu.anthropic.claude-...-id> AWS_PROFILE=underdog-coach AWS_REGION=eu-central-1 \
+DATABASE_URL=postgresql+psycopg://underdog:underdog_dev_pw@localhost:5432/underdog_coach \
 .venv/bin/uvicorn main:app --reload
 ```
 
-**5. Point the frontend at it:** copy `frontend/.env.example` to
-`frontend/.env.local` (already defaults to `http://localhost:8000`).
+Point the frontend at it via `frontend/.env.local` (copy
+`frontend/.env.example`, already defaults to `http://localhost:8000`).
 
-**6. Verify it's really hitting Bedrock**, not the offline fallback: watch
-the `uvicorn` terminal while using the app — a real call prints Strands'
-live tool-call trace (`Tool #1: get_roster`, etc.) as it happens. The
-offline fallback never touches this code path at all. You can also test
-the endpoints directly:
+**Verify it's really hitting Bedrock**, not degrading: watch the
+`uvicorn` terminal while playing — a real call prints Strands' live
+tool-call trace (`Tool #1: get_roster`, etc.) as it happens. Each
+endpoint response also carries a `degraded: true/false` flag and a
+`tool_calls` list the frontend surfaces in the activity ticker.
 
-```bash
-curl -s localhost:8000/opponent -H 'content-type: application/json' -d '{
-  "session_id":"smoke-1","formation_code":"4-4-2","width_spread":62,"avg_def_line":71}'
-```
-Take the `opponent` and `target_matchup` fields from that response and feed
-them into `POST /coach-feedback`. If a response body contains an
-apostrophe (LLM text often does — "We're shifting..."), don't paste it
-into a single-quoted `-d '...'` string — it'll break bash's quoting.
-Write it to a file and use `-d @file.json` instead.
+## Deploying to AWS (SAM) — legacy path
 
-## Deploying to AWS (SAM)
-
-`template.yaml` spins up the whole backend:
-
-- **Lambda** running the FastAPI app (`backend/main.py`, via Mangum) behind
-- **API Gateway (HTTP API)**, with CORS open for the frontend to call it
-- **DynamoDB** (`SessionTable`) — per-session coaching history, read/written
-  by `DynamoProgressAgent` whenever the `SESSION_TABLE` env var is set
-- **IAM** permissions scoped to `bedrock:InvokeModel*` so the agents can
-  actually call Bedrock
-
-Prerequisites: [AWS SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
-(`brew install aws-sam-cli`) and the Bedrock access set up above.
+`template.yaml` deploys the **older free-play flow** (`/drill`,
+`/opponent`, `/coach-feedback` against DynamoDB session memory, no
+turn-based grid/Postgres) — it has not been updated for the
+match/turn/rules-engine system described above, which is currently
+local-Docker-dev only. Left in place as an alternate deploy target, not
+the primary path.
 
 ```bash
 make build     # copies data/ -> backend/data/, then sam build
@@ -180,36 +240,30 @@ make local     # run against SAM's local Lambda emulator (needs Docker)
 make destroy   # tear the whole stack down
 ```
 
-**Deploying with a real `BedrockModelId` / `ScenarioAgentRuntimeArn`:**
 `samconfig.toml` is gitignored (copy `samconfig.toml.example` to
-`samconfig.toml` and fill in your own values), same pattern as
-`backend/.env` — both parameters are ARNs that embed your AWS account id,
-which you don't want sitting in a public repo's history. With your own
+`samconfig.toml` and fill in your own values) — same reasoning as
+`backend/.env`, both embed your AWS account id. With your own
 `samconfig.toml` in place, `make deploy` / `make deploy-guided` work
-normally; `--guided` is safe here since it only writes back to your local,
+normally; `--guided` is safe since it only writes back to your local,
 gitignored copy.
-
-`make build` copies `data/` into `backend/data/` before `sam build` since
-the Lambda's `CodeUri` is `backend/` — `player_data.py` checks both
-locations so local dev (`uvicorn`) and the deployed Lambda resolve the
-same files without duplicating them in the repo.
 
 Known gaps, not yet built:
 
-- **Bedrock AgentCore** — `DynamoProgressAgent` is a reasonable stand-in,
-  but AgentCore's native session state would replace it directly if you
-  want agent memory (not just round history) to persist.
-- **Player roster data** — still bundled as static JSON in the deploy
-  package. Move `data/players.json` to DynamoDB once rosters need to be
-  editable at runtime (e.g. a real coach building their own club's roster).
-- **Roster entry UI** and the **inclusion/"everyone plays" balancing
-  mechanic** are not implemented — the current rosters are fixed demo
-  data.
+- **Turn-based system on AWS** — the Postgres-backed match/turn/rules
+  engine only runs locally; porting it to the Lambda path (RDS or
+  DynamoDB) is unstarted.
+- **Real authentication** — the login screen is an intentional fake
+  (`frontend/lib/auth.ts`, a `localStorage` flag), not real access
+  control.
+- **Player management on the deployed path** — `POST/PATCH/DELETE
+  /players` requires `DATABASE_URL` (Postgres); the DynamoDB/JSON deploy
+  path has no write support for rosters yet.
 
 ## Extending the trait system
 
 To add a new trait: add it to `data/traits.json` with a one-line plain
-definition, then tag it onto any player in `data/players.json`. Agents
-pick it up automatically through the `player_data` tool — no code changes
-needed unless you want a new agent heuristic (like `find_exploitable_matchup`)
-to specifically reason about it.
+definition, then tag it onto any player in `data/players.json` (or via
+the Roster Manager UI, once seeded into Postgres). Agents pick it up
+automatically through the `player_data` tool — no code changes needed
+unless you want a new heuristic (like `find_exploitable_matchups`) to
+specifically reason about it.
