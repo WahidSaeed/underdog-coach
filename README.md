@@ -8,6 +8,69 @@ judging its own homework. A coach agent explains *why* a turn graded the
 way it did, by player name and by trait, grounded in the same facts the
 scoring used.
 
+## Submission overview
+
+**What does it do?** Underdog Coach is a chess-like football tactics
+trainer. You set a formation on a fixed grid; an Opponent Manager agent
+commits its own counter-formation and targets a real weakness on your
+roster; a Coach agent grades the turn and explains it — citing specific
+players and traits, never generic advice.
+
+**What problem does it solve?** Most tactics content for grassroots
+coaches is either static diagrams or vague platitudes ("your defense is
+weak"). Underdog Coach turns tactics into a practiced skill: every
+decision produces a graded, explained outcome tied to a concrete rule
+(offside, marking, pressing, defensive-line shape) and a concrete player
+fact (pace, position, a tagged strength/weakness) — so a coach learns
+what to actually look for, not just what to read about.
+
+**AWS services used:**
+
+- **Amazon Bedrock** — the model backend for all four agents (Strands
+  `Agent`s), via the EU cross-region Claude inference profile
+- **Amazon Bedrock AgentCore Runtime** — optional hosted deployment
+  target for the Scenario agent (`agentcore/`), so it can run
+  out-of-process from the main Lambda
+- **AWS Lambda** — hosts the FastAPI backend (`backend/main.py`, via
+  Mangum) in the deployed stack
+- **Amazon API Gateway (HTTP API)** — fronts the Lambda, CORS-enabled for
+  the frontend
+- **Amazon DynamoDB** — per-session coaching progress/history table
+- **AWS IAM** — scoped permissions for `bedrock:InvokeModel*` and
+  `bedrock-agentcore:InvokeAgentRuntime`
+
+**How the agents work together:**
+
+```mermaid
+flowchart TD
+    U[User] -->|POST /match/start| MD[Match Director Agent]
+    MD -->|generate_scenario tool: delegates to| SC[Scenario Agent]
+    MD -->|scout_matchup tool| PD[(player_data)]
+    SC --> BR[(Amazon Bedrock)]
+    MD --> BR
+
+    U -->|POST /opponent, every turn| OM[Opponent Manager Agent]
+    OM -->|scout_matchup, get_roster tools| PD
+    OM --> BR
+
+    U -->|POST /coach-feedback, every turn| CO[Coach Agent]
+    CO -->|get_player_traits, explain_trait tools| PD
+    CO --> BR
+
+    MD --> PR[Progress Agent]
+    OM --> PR
+    PR --> SS[(Session store: DynamoDB / Postgres)]
+```
+
+Match Director designs the scenario for a new match, delegating the
+actual scenario prose to the Scenario agent — a genuine agent-to-agent
+call, not backend code chaining two fixed requests. Every turn after
+that, Opponent Manager commits a counter-plan and targets a matchup, and
+Coach explains the graded outcome — both call back into the same
+player-data tools, so nothing either agent says can drift from the
+actual roster. Progress agent watches across turns and rounds and flags
+a recurring weakness back to the Match Director for the next match.
+
 ## Why this architecture
 
 **The player personality system is what makes the coaching real.** Every
